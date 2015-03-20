@@ -1,0 +1,4 @@
+gevent
+devp2p
+pyethereum
+wheel
