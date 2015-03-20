@@ -9,7 +9,7 @@ pyethapp
         :target: https://pypi.python.org/pypi/pyethapp
 
 
-pyethereum eEthereum Client
+Python Ethereum Client
 
 * Free software: BSD license
 * Documentation: https://pyethapp.readthedocs.org.
