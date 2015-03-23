@@ -1,4 +1,6 @@
+decorator
 gevent
 devp2p
 pyethereum
 wheel
+pyyaml
