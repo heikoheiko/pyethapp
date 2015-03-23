@@ -3,6 +3,7 @@ import io
 import sys
 import signal
 import gevent
+from gevent.event import Event
 from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 import devp2p.crypto as crypto

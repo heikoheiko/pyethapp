@@ -3,6 +3,7 @@ import inspect
 import gevent
 import gevent.wsgi
 import gevent.queue
+from gevent.event import Event
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol
 from tinyrpc.transports.wsgi import WsgiServerTransport
 from tinyrpc.server.gevent import RPCServerGreenlets
@@ -16,6 +17,7 @@ slogging.configure(config_string=':debug')
 
 
 class JSONRPCServer(BaseService):
+    """Service providing a JSON RPC server."""
 
     name = 'jsonrpc'
 
@@ -24,7 +26,8 @@ class JSONRPCServer(BaseService):
         BaseService.__init__(self, app)
         self.app = app
         self.dispatcher = RPCDispatcher()
-        self.dispatcher.register_instance(Web3(), Web3.prefix)
+        for subdispatcher in (Web3, Net):
+            self.dispatcher.register_instance(subdispatcher(), subdispatcher.prefix)
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
 
         # start wsgi server as a background-greenlet
@@ -98,3 +101,25 @@ class Web3(object):
     @encode_res(hex_encoder)
     def sha3(self, data):
         return pyethereum.utils.sha3(data)
+
+    @public
+    def clientVersion(self):
+        raise NotImplementedError("RPC method not implemented yet")
+
+
+class Net(object):
+
+    prefix = 'net_'
+
+    @public
+    def version(self):
+        raise NotImplementedError("RPC method not implemented yet")
+
+    @public
+    def listening(self):
+        raise NotImplementedError("RPC method not implemented yet")
+
+    @public
+    @encode_res(hex_encoder)
+    def peerCount(self):
+        raise NotImplementedError("RPC method not implemented yet")
