@@ -1,0 +1,100 @@
+from decorator import decorator
+import inspect
+import gevent
+import gevent.wsgi
+import gevent.queue
+from tinyrpc.protocols.jsonrpc import JSONRPCProtocol
+from tinyrpc.transports.wsgi import WsgiServerTransport
+from tinyrpc.server.gevent import RPCServerGreenlets
+from tinyrpc.dispatch import RPCDispatcher, public
+import pyethereum.utils
+import pyethereum.slogging as slogging
+from devp2p.service import BaseService
+
+log = slogging.get_logger('jsonrpc')
+slogging.configure(config_string=':debug')
+
+
+class JSONRPCServer(BaseService):
+
+    name = 'jsonrpc'
+
+    def __init__(self, app):
+        log.debug('initializing JSONRPCServer')
+        BaseService.__init__(self, app)
+        self.app = app
+        self.dispatcher = RPCDispatcher()
+        self.dispatcher.register_instance(Web3(), Web3.prefix)
+        transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
+
+        # start wsgi server as a background-greenlet
+        self.wsgi_server = gevent.wsgi.WSGIServer(('127.0.0.1', 5000), transport.handle)
+
+        self.rpc_server = RPCServerGreenlets(
+            transport,
+            JSONRPCProtocol(),
+            self.dispatcher
+        )
+
+    def _run(self):
+        log.info('starting JSONRPCServer')
+        # in the main greenlet, run our rpc_server
+        self.wsgi_thread = gevent.spawn(self.wsgi_server.serve_forever)
+        self.rpc_server.serve_forever()
+
+    def stop(self):
+        log.info('stopping JSONRPCServer')
+        self.wsgi_thread.kill()
+
+
+def hex_decoder(data):
+    """Decode `data` from hex with `0x` prefix.
+    
+    :raises: :exc:`ValueErro` if `data` is not properly encoded.
+    """
+    if not data.startswith('0x'):
+        success = False
+    else:
+        try:
+            return data[2:].decode('hex')
+        except TypeError:
+            success = False
+    assert not success
+    raise ValueError('Invalid hex encoding')
+
+
+def hex_encoder(data):
+    """Encode `data` in hex with `0x` prefix."""
+    return '0x' + data.encode('hex')
+
+
+def decode_arg(name, decoder):
+    """Create a decorator that applies `decoder` to argument `name`."""
+    @decorator
+    def new_f(f, *args, **kwargs):
+        call_args = inspect.getcallargs(f, *args, **kwargs)
+        call_args[name] = decoder(call_args[name])
+        return f(**call_args)
+    return new_f
+
+
+def encode_res(encoder):
+    """Create a decorator that applies `encoder` to the return value of the
+    decorated function.
+    """
+    @decorator
+    def new_f(f, *args, **kwargs):
+        res = f(*args, **kwargs)
+        return encoder(res)
+    return new_f
+
+
+class Web3(object):
+
+    prefix = 'web3_'
+
+    @public
+    @decode_arg('data', hex_decoder)
+    @encode_res(hex_encoder)
+    def sha3(self, data):
+        return pyethereum.utils.sha3(data)

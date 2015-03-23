@@ -4,10 +4,10 @@ import sys
 import signal
 import gevent
 from devp2p.peermanager import PeerManager
-from devp2p.jsonrpc import JSONRPCServer
 from devp2p.discovery import NodeDiscovery
 import devp2p.crypto as crypto
 from devp2p.app import BaseApp
+from jsonrpc import JSONRPCServer
 import pyethereum.slogging as slogging
 log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
@@ -54,7 +54,7 @@ p2p:
     app.start()
 
     # wait for interupt
-    evt = gevent.event.Event()
+    evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)
     gevent.signal(signal.SIGINT, evt.set)
