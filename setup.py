@@ -59,5 +59,9 @@ setup(
         'Programming Language :: Python :: 2.7',
     ],
     cmdclass={'test': PyTest},
-    tests_require=test_requirements
+    tests_require=test_requirements,
+    entry_points='''
+    [console_scripts]
+    pyethapp=pyethapp.app:app
+    '''
 )
