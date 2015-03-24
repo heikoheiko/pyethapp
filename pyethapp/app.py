@@ -27,7 +27,7 @@ def app(alt_config):
 
     # register services
     # NodeDiscovery.register_with_app(app)
-    # PeerManager.register_with_app(app)
+    PeerManager.register_with_app(app)
     JSONRPCServer.register_with_app(app)
 
     # start app
