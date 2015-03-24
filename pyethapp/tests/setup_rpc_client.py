@@ -17,12 +17,23 @@ Intended usage:
 """
 import ast
 from pprint import pprint
+import sys
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol
 from tinyrpc.transports.http import HttpPostClientTransport
 from tinyrpc import RPCClient
 
+try:
+    client = sys.argv[1]
+except KeyError:
+    client = 'python'
+port = {
+    'python': 5000,
+    'go': 8545
+}[client]
+print 'client:', client, 'port:', port
+
 protocol = JSONRPCProtocol()
-transport = HttpPostClientTransport('http://127.0.0.1:5000')
+transport = HttpPostClientTransport('http://127.0.0.1:{}'.format(port))
 
 
 def call(method, *args, **kwargs):
