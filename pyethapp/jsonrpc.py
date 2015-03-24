@@ -26,7 +26,7 @@ class JSONRPCServer(BaseService):
         BaseService.__init__(self, app)
         self.app = app
         self.dispatcher = RPCDispatcher()
-        for subdispatcher in (Web3, Net):
+        for subdispatcher in (Web3, Net, Compilers):
             self.dispatcher.register_instance(subdispatcher(), subdispatcher.prefix)
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
 
@@ -123,3 +123,58 @@ class Net(object):
     @encode_res(hex_encoder)
     def peerCount(self):
         raise NotImplementedError("RPC method not implemented yet")
+
+
+class Compilers(object):
+    """Subdispatcher for compiler related RPC methods."""
+
+    prefix = 'eth_'
+    potentially_available = ['serpent', 'solidity']
+
+    def __init__(self):
+        self.compilers_ = None
+
+    @property
+    def compilers(self):
+        if self.compilers_ is None:
+            self.compilers_ = {}
+            try:
+                import serpent
+                self.compilers_['serpent'] = serpent.compile
+                self.compilers_['lll'] = serpent.compile_lll
+            except ImportError:
+                pass
+            try:
+                import solidity
+                self.compilers_['solidity'] = solidity.compile
+            except ImportError:
+                pass
+        return self.compilers_
+
+    @public
+    def getCompilers(self):
+        return self.compilers.keys()
+
+    @public
+    @encode_res(hex_encoder)
+    def compileSolidity(self, code):
+        try:
+            return self.compilers['solidity'](code)
+        except KeyError:
+            raise TypeError('Compiler not found')
+
+    @public
+    @encode_res(hex_encoder)
+    def compileSerpent(self, code):
+        try:
+            return self.compilers['serpent'](code)
+        except KeyError:
+            raise TypeError('Compiler not found')
+
+    @public
+    @encode_res(hex_encoder)
+    def compileLLL(self, code):
+        try:
+            return self.compilers['lll'](code)
+        except KeyError:
+            raise TypeError('Compiler not found')
