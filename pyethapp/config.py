@@ -55,6 +55,18 @@ def set_config_param(s):
 
 
 default_config = """
+app:
+    services:  # in order of registration
+        #- NodeDiscovery
+        - peermanager
+        - jsonrpc
+        - myservice
+
+    # The modules in the following directories are loaded at startup.
+    # Instances of BaseService found in these modules are made available as
+    # service and can be registered via "app.services".
+    contrib_dirs: []
+
 p2p:
     num_peers: 10
     bootstrap_nodes:
@@ -73,11 +85,13 @@ p2p:
 
 jsonrpc:
     port: 8545
+
 """
 
 
 CONFIG_DIRECTORY = click.get_app_dir('pyethapp')
 CONFIG_FILENAME = os.path.join(CONFIG_DIRECTORY, 'config.yaml')
+CONTRIB_DIRECTORY = os.path.join(CONFIG_DIRECTORY, 'contrib')
 
 
 if os.path.exists(CONFIG_FILENAME):
@@ -87,9 +101,10 @@ else:
     load_config(default_config)
     pubkey = crypto.privtopub(config['p2p']['privkey_hex'].decode('hex'))
     config['p2p']['node_id'] = crypto.sha3(pubkey)
+    config['app']['contrib_dirs'].append(CONTRIB_DIRECTORY)
     # problem with the following code: default config specified here is
     # ignored if config file already exists -> annoying for development with
-    # frequently changing default config
+    # frequently changing default config. Also: comments are discarded
 #   try:
 #       os.makedirs(CONFIG_DIRECTORY)
 #   except OSError as exc:

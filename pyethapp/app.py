@@ -1,20 +1,28 @@
-import yaml
+from importlib import import_module
+import inspect
 import sys
 import os
 import signal
+import click
+from click import BadParameter
 import gevent
 from gevent.event import Event
+from devp2p.service import BaseService
 from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 import devp2p.crypto as crypto
 from devp2p.app import BaseApp
-from jsonrpc import JSONRPCServer
 import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
-import click
-from click import BadParameter
+from jsonrpc import JSONRPCServer
+
 log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
+
+
+services = {}
+for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
+    services[service.name] = service
 
 
 @click.command()
@@ -35,10 +43,34 @@ def app(alt_config, config_values):
     # create app
     app = BaseApp(config)
 
+    # load contrib services
+    contrib_modules = []
+    for directory in config['app']['contrib_dirs']:
+        sys.path.append(directory)
+        for filename in os.listdir(directory):
+            path = os.path.join(directory, filename)
+            if os.path.isfile(path) and filename.endswith('.py'):
+                contrib_modules.append(import_module(filename[:-3]))
+    contrib_services = {}
+    for module in contrib_modules:
+        classes = inspect.getmembers(module, inspect.isclass)
+        for _, cls in classes:
+            if issubclass(cls, BaseService) and cls != BaseService:
+                contrib_services[cls.name] = cls
+    log.info('Loaded contrib services', services=sorted(contrib_services.keys()))
+    replaced_services = set(services).intersection(set(contrib_services))
+    if  len(replaced_services) > 0:
+        log.warning('Replaced some built in services', services=replaced_services)
+    services.update(contrib_services)
+
     # register services
-    # NodeDiscovery.register_with_app(app)
-    PeerManager.register_with_app(app)
-    JSONRPCServer.register_with_app(app)
+    for name in config['app']['services']:
+        try:
+            service = services[name]
+        except KeyError:
+            log.warning('Attempted to register unkown service', service=name)
+        else:
+            service.register_with_app(app)
 
     # start app
     app.start()
