@@ -32,6 +32,28 @@ def update_config(f):
     config.update(yaml.load(f))
 
 
+def set_config_param(s):
+    """Set a specific config parameter.
+
+    :param s: a string of the form ``a.b.c=d`` which will set the value of
+              ``config['a']['b']['b']`` to ``yaml.load(d)``
+    :raises: :exc:`ValueError` if `s` is malformed or the value to set is not
+             valid YAML
+    """
+    try:
+        param, value = s.split('=', 1)
+        keys = param.split('.')
+    except ValueError:
+        raise ValueError('Invalid config parameter')
+    d = config
+    for key in keys[:-1]:
+        d = d.setdefault(key, {})
+    try:
+        d[keys[-1]] = yaml.load(value)
+    except yaml.parser.ParserError:
+        raise ValueError('Invalid config value')
+
+
 default_config = """
 p2p:
     num_peers: 10
