@@ -60,7 +60,6 @@ app:
         #- NodeDiscovery
         - peermanager
         - jsonrpc
-        - myservice
 
     # The modules in the following directories are loaded at startup.
     # Instances of BaseService found in these modules are made available as

@@ -29,7 +29,11 @@ for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')
 @click.option('config_values', '-c', multiple=True, type=str,
               help='Single configuration parameters (<param>=<value>)')
-def app(alt_config, config_values):
+@click.option('add_services', '--register', '-r', multiple=True, type=str,
+              help='add another service')
+@click.option('no_services', '--deregister', '-d', multiple=True, type=str,
+              help='prevent a service from being registered')
+def app(alt_config, config_values, add_services, no_services):
     if alt_config:
         load_config(alt_config)
     for config_value in config_values:
@@ -64,13 +68,18 @@ def app(alt_config, config_values):
     services.update(contrib_services)
 
     # register services
-    for name in config['app']['services']:
+    for name in config['app']['services'] + list(add_services):
+        if name in no_services:
+            continue
         try:
             service = services[name]
         except KeyError:
             log.warning('Attempted to register unkown service', service=name)
         else:
-            service.register_with_app(app)
+            if name not in app.services:
+                service.register_with_app(app)
+            else:
+                log.warning('Attempted to register service twice', service=name)
 
     # start app
     app.start()
