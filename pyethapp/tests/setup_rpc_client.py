@@ -27,7 +27,7 @@ try:
 except KeyError:
     client = 'python'
 port = {
-    'python': 5000,
+    'python': 8545,
     'go': 8545
 }[client]
 print 'client:', client, 'port:', port

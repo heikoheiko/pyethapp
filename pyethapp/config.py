@@ -48,6 +48,9 @@ p2p:
     listen_host: 0.0.0.0
     listen_port: 30303
     privkey_hex: 65462b0520ef7d3df61b9992ed3bea0c56ead753be7c8b3614e0ce01e4cac41b
+
+jsonrpc:
+    port: 8545
 """
 
 
