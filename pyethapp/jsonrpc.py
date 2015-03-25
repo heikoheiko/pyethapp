@@ -19,8 +19,7 @@ slogging.configure(config_string=':debug')
 
 
 # hack to return the correct json rpc error code if the param count is wrong
-# (this is not done by tinyrpc and I couldn't see an easy way to fix it
-# without breaking their layer structure)
+# (see https://github.com/mbr/tinyrpc/issues/19)
 def public(f):
     def new_f(*args, **kwargs):
         try:
@@ -43,14 +42,17 @@ class JSONRPCServer(BaseService):
         log.debug('initializing JSONRPCServer')
         BaseService.__init__(self, app)
         self.app = app
+
         self.dispatcher = RPCDispatcher()
-        for subdispatcher in (Web3, Net, Compilers):
-            self.dispatcher.register_instance(subdispatcher(), subdispatcher.prefix)
+        # register sub dispatchers
+        self.dispatcher.register_instance(Web3(), Web3.prefix)
+        self.dispatcher.register_instance(Net(self.app.services.peermanager), Net.prefix)
+        self.dispatcher.register_instance(Compilers(), Compilers.prefix)
+
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
-
         # start wsgi server as a background-greenlet
-        self.wsgi_server = gevent.wsgi.WSGIServer(('127.0.0.1', 5000), transport.handle)
-
+        self.port = app.config['jsonrpc']['port']
+        self.wsgi_server = gevent.wsgi.WSGIServer(('127.0.0.1', self.port), transport.handle)
         self.rpc_server = RPCServerGreenlets(
             transport,
             JSONRPCProtocol(),
@@ -58,7 +60,7 @@ class JSONRPCServer(BaseService):
         )
 
     def _run(self):
-        log.info('starting JSONRPCServer')
+        log.info('starting JSONRPCServer', port=self.port)
         # in the main greenlet, run our rpc_server
         self.wsgi_thread = gevent.spawn(self.wsgi_server.serve_forever)
         self.rpc_server.serve_forever()
@@ -85,7 +87,9 @@ def hex_decoder(data):
 
 
 def hex_encoder(data):
-    """Encode `data` in hex with `0x` prefix."""
+    """Encode binary or numerical `data` in hex with `0x` prefix."""
+    if pyethereum.utils.is_numeric(data):
+        data = pyethereum.utils.int_to_big_endian(data)
     return '0x' + data.encode('hex')
 
 
@@ -118,8 +122,8 @@ class Web3(object):
     @decode_arg('data', hex_decoder)
     @encode_res(hex_encoder)
     def sha3(self, data):
-        if len(data) == 0:
-            raise BadRequestError('Data must not be empty')
+        #if len(data) == 0:
+        #    raise BadRequestError('Data must not be empty')
         return pyethereum.utils.sha3(data)
 
     @public
@@ -131,8 +135,8 @@ class Net(object):
 
     prefix = 'net_'
 
-    #def __init__(self, peermanager):
-    #    self.peermanager = peermanager
+    def __init__(self, peermanager):
+        self.peermanager = peermanager
 
     @public
     def version(self):
@@ -146,10 +150,6 @@ class Net(object):
     @encode_res(hex_encoder)
     def peerCount(self):
         return len(self.peermanager.peers)
-
-    @public
-    def simple_test(self, arg):
-        return arg[::-1]
 
 
 class Compilers(object):

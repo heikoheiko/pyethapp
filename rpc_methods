@@ -3,7 +3,7 @@ Checklist for implemented JSON RPC methods
 [x] web3_sha3
 [ ] web3_clientVersion
 [ ] net_version
-[ ] net_peerCount
+[x] net_peerCount
 [ ] net_listening
 [ ] eth_coinbase
 [ ] eth_mining
