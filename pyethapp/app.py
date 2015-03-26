@@ -15,14 +15,17 @@ from devp2p.app import BaseApp
 import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
+from leveldb import LevelDBService
+from codernitydb import CodernityDBService
 
 log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
 
 
+# a dictionary mapping class names to the respective services
 services = {}
-for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
-    services[service.name] = service
+for service in [NodeDiscovery, PeerManager, JSONRPCServer, LevelDBService]:
+    services[service.__name__] = service
 
 
 @click.command()
@@ -60,11 +63,11 @@ def app(alt_config, config_values, add_services, no_services):
         classes = inspect.getmembers(module, inspect.isclass)
         for _, cls in classes:
             if issubclass(cls, BaseService) and cls != BaseService:
-                contrib_services[cls.name] = cls
+                contrib_services[cls.__name__] = cls
     log.info('Loaded contrib services', services=sorted(contrib_services.keys()))
     replaced_services = set(services).intersection(set(contrib_services))
     if  len(replaced_services) > 0:
-        log.warning('Replaced some built in services', services=replaced_services)
+        log.info('Replaced some built in services', services=list(replaced_services))
     services.update(contrib_services)
 
     # register services

@@ -56,14 +56,15 @@ def set_config_param(s):
 
 default_config = """
 app:
-    services:  # in order of registration
+    services:  # in order of registration (name of classes, not cls.name)
         #- NodeDiscovery
-        - peermanager
-        - jsonrpc
+        - PeerManager
+        - JSONRPCServer
 
     # The modules in the following directories are loaded at startup.
     # Instances of BaseService found in these modules are made available as
-    # service and can be registered via "app.services".
+    # service and can be registered via "app.services". If a service has the
+    # same name as a builtin service, the contributed one takes precedence.
     contrib_dirs: []
 
 p2p:
