@@ -4,7 +4,7 @@ from CodernityDB.database import Database, DatabasePathException,  \
                                 RecordNotFound
 from CodernityDB.hash_index import HashIndex
 from devp2p.service import BaseService
-import gevent
+from gevent.event import Event
 from pyethereum import compress
 from pyethereum.slogging import get_logger
 
@@ -30,12 +30,10 @@ class CodernityDB(BaseService):
 
     name = 'db'
 
-    def __init__(self, app):
-        super(CodernityDB, self).__init__(app)
-        self.dbfile = os.path.join(app.config['app']['dir'], app.config['db']['path'])
-        self.db = None
-
-    def _run(self):
+    def start(self):
+        super(CodernityDB, self).start()
+        self.dbfile = os.path.join(self.app.config['app']['dir'],
+                                   self.app.config['db']['path'])
         self.uncommitted = dict()
         self.db = Database(self.dbfile)
         try:
@@ -45,14 +43,17 @@ class CodernityDB(BaseService):
             log.info('db does not exist, creating it', path=self.dbfile)
             self.db.create()
             self.db.add_index(MD5Index(self.dbfile, 'key'))
-        while True:
-            gevent.sleep(0)
+        self.stop_event = Event()
+
+    def _run(self):
+        self.stop_event.wait()
 
     def stop(self):
         # commit?
         log.info('closing db')
         if self.started:
             self.db.close()
+            self.stop_event.set()
 
     def get(self, key):
         log.debug('getting entry', key=key)

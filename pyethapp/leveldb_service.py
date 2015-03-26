@@ -1,7 +1,7 @@
 from hashlib import md5
 import os
 from devp2p.service import BaseService
-import gevent
+from gevent.event import Event
 import leveldb
 from pyethereum import compress
 from pyethereum import slogging
@@ -16,18 +16,21 @@ class LevelDB(BaseService):
 
     name = 'db'
 
-    def __init__(self, app):
-        super(LevelDB, self).__init__(app)
-        self.dbfile = os.path.join(app.config['app']['dir'], app.config['db']['path'])
-
-    def _run(self):
+    def start(self):
+        super(LevelDB, self).start()
+        self.dbfile = os.path.join(self.app.config['app']['dir'],
+                                   self.app.config['db']['path'])
         log.info('opening LevelDB', path=self.dbfile)
         self.db = leveldb.LevelDB(self.dbfile)
         self.uncommitted = dict()
-        while True:
-            gevent.sleep(0)
+        self.stop_event = Event()
+
+    def _run(self):
+        self.stop_event.wait()
 
     def stop(self):
+        if self.started:
+            self.stop_event.set()
         # commit?
         log.info('closing db')
 
