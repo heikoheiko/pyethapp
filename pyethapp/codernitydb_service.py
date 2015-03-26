@@ -1,9 +1,9 @@
 from hashlib import md5
 import os
-from pyethereu
 from CodernityDB.database import Database, DatabasePathException,  \
                                 RecordNotFound
 from CodernityDB.hash_index import HashIndex
+from devp2p.service import BaseService
 from pyethereum import compress
 from pyethereum.slogging import get_logger
 

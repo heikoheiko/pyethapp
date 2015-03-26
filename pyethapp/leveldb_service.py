@@ -1,7 +1,7 @@
-import os
-import threading
-from pyethereum import compress
 from hashlib import md5
+import os
+from devp2p.service import BaseService
+from pyethereum import compress
 from pyethereum.slogging import get_logger
 log = get_logger('db')
 

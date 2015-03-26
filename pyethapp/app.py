@@ -15,8 +15,6 @@ from devp2p.app import BaseApp
 import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
-from leveldb import LevelDBService
-from codernitydb import CodernityDBService
 
 log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
@@ -24,8 +22,21 @@ slogging.configure(config_string=':debug')
 
 # a dictionary mapping class names to the respective services
 services = {}
-for service in [NodeDiscovery, PeerManager, JSONRPCServer, LevelDBService]:
+for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
     services[service.__name__] = service
+
+try:
+    from leveldb_service import LevelDB
+except ImportError:
+    pass
+else:
+    services['LevelDB'] = LevelDB
+try:
+    from codernitydb_service import CodernityDB
+except ImportError:
+    pass
+else:
+    services['CodernityDB'] = CodernityDB
 
 
 @click.command()
