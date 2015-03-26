@@ -42,5 +42,5 @@ def call(method, *args, **kwargs):
     print "Request:"
     pprint(ast.literal_eval(request.serialize()), width=1)
     print "Reply:"
-    pprint(ast.literal_eval(reply), width=1)
+    print reply
     return protocol.parse_reply(reply).result

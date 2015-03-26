@@ -25,6 +25,7 @@ services = {}
 for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
     services[service.__name__] = service
 
+# load databases if available
 try:
     from leveldb_service import LevelDB
 except ImportError:
@@ -37,7 +38,6 @@ except ImportError:
     pass
 else:
     services['CodernityDB'] = CodernityDB
-
 
 @click.command()
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')

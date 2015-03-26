@@ -1,21 +1,31 @@
 from hashlib import md5
 import os
 from devp2p.service import BaseService
+import gevent
+import leveldb
 from pyethereum import compress
+from pyethereum import slogging
 from pyethereum.slogging import get_logger
-log = get_logger('db')
+
+slogging.set_level('db', 'debug')
+log = slogging.get_logger('db')
 
 
 class LevelDB(BaseService):
     """A service providing an interface to a level db."""
 
-    def __init__(self, dbfile):
-        self.dbfile = os.path.abspath(dbfile)
+    name = 'db'
+
+    def __init__(self, app):
+        super(LevelDB, self).__init__(app)
+        self.dbfile = os.path.join(app.config['app']['dir'], app.config['db']['path'])
 
     def _run(self):
-        log.info('opening level db', path=dbfile)
-        self.db = leveldb.LevelDB(dbfile)
+        log.info('opening LevelDB', path=self.dbfile)
+        self.db = leveldb.LevelDB(self.dbfile)
         self.uncommitted = dict()
+        while True:
+            gevent.sleep(0)
 
     def stop(self):
         # commit?

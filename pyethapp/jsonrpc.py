@@ -33,6 +33,24 @@ def public(f):
     return public_(new_f)
 
 
+class LoggingDispatcher(RPCDispatcher):
+    """A dispatcher that logs every RPC method call."""
+
+    def __init__(self):
+        super(LoggingDispatcher, self).__init__()
+        self.logger = log.debug
+
+    def dispatch(self, request):
+        self.logger('RPC call', method=request.method, args=request.args,
+                    kwargs=request.kwargs, id=request.unique_id)
+        res = super(LoggingDispatcher, self).dispatch(request)
+        try:
+            self.logger('RPC result', id=res.unique_id, result=res.result)
+        except AttributeError:
+            self.logger('RPC error', id=res.unique_id, error=res.error)
+        return res
+
+
 class JSONRPCServer(BaseService):
     """Service providing a JSON RPC server."""
 
@@ -43,11 +61,20 @@ class JSONRPCServer(BaseService):
         BaseService.__init__(self, app)
         self.app = app
 
-        self.dispatcher = RPCDispatcher()
+        #self.dispatcher = LoggingDispatcher(log.debug)
+        self.dispatcher = LoggingDispatcher()
+        #self.dispatcher = RPCDispatcher()
         # register sub dispatchers
         self.dispatcher.register_instance(Web3(), Web3.prefix)
-        self.dispatcher.register_instance(Net(self.app.services.peermanager), Net.prefix)
+        if 'peermanager' in self.app.services:
+            self.dispatcher.register_instance(Net(self.app.services.peermanager), Net.prefix)
+        else:
+            log.warning('No peermanager registered. Some RPC methods will not be available')
         self.dispatcher.register_instance(Compilers(), Compilers.prefix)
+        if 'db' in self.app.services:
+            self.dispatcher.register_instance(DB(self.app.services.db), DB.prefix)
+        else:
+            log.warning('No db registered. Some RPC methods will not be available')
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
         # start wsgi server as a background-greenlet
@@ -78,8 +105,11 @@ def hex_decoder(data):
     if not data.startswith('0x'):
         success = False
     else:
+        data = data[2:].strip('0')
+        if len(data) % 2 == 1:
+            data = '0' + data
         try:
-            return data[2:].decode('hex')
+            return data.decode('hex')
         except TypeError:
             success = False
     assert not success
@@ -205,3 +235,37 @@ class Compilers(object):
             return self.compilers['lll'](code)
         except KeyError:
             raise MethodNotFoundError()
+
+
+class DB(object):
+
+    prefix = 'db_'
+
+    def __init__(self, db):
+        self.db = db
+
+    @public
+    def putString(self, db_name, key, value):
+        self.db.put(db_name + key, value)
+        return True
+
+    @public
+    def getString(self, db_name, key):
+        try:
+            return self.db.get(db_name + key)
+        except KeyError:
+            return ''
+
+    @public
+    @decode_arg('value', hex_decoder)
+    def putHex(self, db_name, key, value):
+        self.db.put(db_name + key, value)
+        return True
+
+    @public
+    @encode_res(hex_encoder)
+    def getHex(self, db_name, key):
+        try:
+            return self.db.get(db_name + key)
+        except KeyError:
+            return ''

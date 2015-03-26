@@ -58,7 +58,9 @@ default_config = """
 app:
     services:  # in order of registration (name of classes, not cls.name)
         #- NodeDiscovery
-        - PeerManager
+        #- PeerManager
+        - LevelDB
+        #- CodernityDB
         - JSONRPCServer
 
     # The modules in the following directories are loaded at startup.
@@ -86,6 +88,9 @@ p2p:
 jsonrpc:
     port: 8545
 
+db:
+    path: db  # either relative to application directory or absolute
+
 """
 
 
@@ -100,6 +105,7 @@ if os.path.exists(CONFIG_FILENAME):
 else:
     load_config(default_config)
     pubkey = crypto.privtopub(config['p2p']['privkey_hex'].decode('hex'))
+    config['app']['dir'] = CONFIG_DIRECTORY
     config['p2p']['node_id'] = crypto.sha3(pubkey)
     config['app']['contrib_dirs'].append(CONTRIB_DIRECTORY)
     # problem with the following code: default config specified here is
