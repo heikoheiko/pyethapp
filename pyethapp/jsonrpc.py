@@ -52,7 +52,7 @@ class LoggingDispatcher(RPCDispatcher):
 
 
 class JSONRPCServer(BaseService):
-    """Service providing a JSON RPC server."""
+    """Service providing an HTTP server with JSON RPC interface."""
 
     name = 'jsonrpc'
 
@@ -61,20 +61,10 @@ class JSONRPCServer(BaseService):
         BaseService.__init__(self, app)
         self.app = app
 
-        #self.dispatcher = LoggingDispatcher(log.debug)
         self.dispatcher = LoggingDispatcher()
-        #self.dispatcher = RPCDispatcher()
         # register sub dispatchers
-        self.dispatcher.register_instance(Web3(), Web3.prefix)
-        if 'peermanager' in self.app.services:
-            self.dispatcher.register_instance(Net(self.app.services.peermanager), Net.prefix)
-        else:
-            log.warning('No peermanager registered. Some RPC methods will not be available')
-        self.dispatcher.register_instance(Compilers(), Compilers.prefix)
-        if 'db' in self.app.services:
-            self.dispatcher.register_instance(DB(self.app.services.db), DB.prefix)
-        else:
-            log.warning('No db registered. Some RPC methods will not be available')
+        for subdispatcher in (Web3, Net, Compilers, DB):
+            subdispatcher.register(self)
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
         # start wsgi server as a background-greenlet
@@ -95,6 +85,38 @@ class JSONRPCServer(BaseService):
     def stop(self):
         log.info('stopping JSONRPCServer')
         self.wsgi_thread.kill()
+
+
+class Subdispatcher(object):
+    """A JSON RPC subdispatcher which can be registered at JSONRPCService.
+
+    :cvar prefix: common prefix shared by all rpc methods implemented by this
+                  subdispatcher
+    :cvar required_services: a list of names of services the subdispatcher
+                             is built on and will be made available as
+                             instance variables
+    """
+
+    prefix = ''
+    required_services = []
+
+    @classmethod
+    def register(cls, json_rpc_service):
+        """Register a new instance at ``json_rpc_service.dispatcher``.
+
+        If one of the required services is not available, log this as warning
+        but don't fail.
+        """
+        dispatcher = cls()
+        for service_name in cls.required_services:
+            try:
+                service = json_rpc_service.app.services[service_name]
+            except KeyError:
+                log.warning('No {} registered. Some RPC methods will not be '
+                            'available'.format(service_name))
+                return
+            setattr(dispatcher, service_name, service)
+        json_rpc_service.dispatcher.register_instance(dispatcher, Subdispatcher.prefix)
 
 
 def hex_decoder(data):
@@ -144,7 +166,8 @@ def encode_res(encoder):
     return new_f
 
 
-class Web3(object):
+class Web3(Subdispatcher):
+    """Subdispatcher for some generic RPC methods."""
 
     prefix = 'web3_'
 
@@ -152,8 +175,6 @@ class Web3(object):
     @decode_arg('data', hex_decoder)
     @encode_res(hex_encoder)
     def sha3(self, data):
-        #if len(data) == 0:
-        #    raise BadRequestError('Data must not be empty')
         return pyethereum.utils.sha3(data)
 
     @public
@@ -161,12 +182,11 @@ class Web3(object):
         raise MethodNotFoundError()
 
 
-class Net(object):
+class Net(Subdispatcher):
+    """Subdispatcher for network related RPC methods."""
 
     prefix = 'net_'
-
-    def __init__(self, peermanager):
-        self.peermanager = peermanager
+    required_services = ['peermanager']
 
     @public
     def version(self):
@@ -182,13 +202,14 @@ class Net(object):
         return len(self.peermanager.peers)
 
 
-class Compilers(object):
+class Compilers(Subdispatcher):
     """Subdispatcher for compiler related RPC methods."""
 
     prefix = 'eth_'
-    potentially_available = ['serpent', 'solidity']
+    required_services = []
 
     def __init__(self):
+        super(Compilers, self).__init__()
         self.compilers_ = None
 
     @property
@@ -237,12 +258,11 @@ class Compilers(object):
             raise MethodNotFoundError()
 
 
-class DB(object):
+class DB(Subdispatcher):
+    """Subdispatcher providing database related RPC methods."""
 
     prefix = 'db_'
-
-    def __init__(self, db):
-        self.db = db
+    required_services = ['db']
 
     @public
     def putString(self, db_name, key, value):
