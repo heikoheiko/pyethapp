@@ -52,7 +52,15 @@ class LoggingDispatcher(RPCDispatcher):
 
 
 class JSONRPCServer(BaseService):
-    """Service providing an HTTP server with JSON RPC interface."""
+    """Service providing an HTTP server with JSON RPC interface.
+
+    Other services can extend the JSON RPC interface by creating a
+    :class:`Subdispatcher` and registering it via
+    `Subdispatcher.register(self.app.services.json_rpc_server)`.
+
+    Alternatively :attr:`dispatcher` can be extended directly (see
+    https://tinyrpc.readthedocs.org/en/latest/dispatch.html).
+    """
 
     name = 'jsonrpc'
 
