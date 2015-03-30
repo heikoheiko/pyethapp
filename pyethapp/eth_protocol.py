@@ -97,6 +97,12 @@ class ETHProtocol(BaseProtocol):
         cmd_id = 6
         structure = [('blocks', rlp.sedes.CountableList(Block))]
 
+        @classmethod
+        def decode_payload(cls, rlp_data):
+            # convert to dict
+            # data = list( of TransientBlocks with decoded headers)
+            return dict((cls.structure[i][0], v) for i, v in enumerate(data))
+
     class newblock(BaseProtocol.command):
 
         """
@@ -109,3 +115,9 @@ class ETHProtocol(BaseProtocol):
         structure = [('block', Block), ('total_difficulty', rlp.sedes.big_endian_int)]
 
         # todo: bloomfilter: so we don't send block to the originating peer
+
+        @classmethod
+        def decode_payload(cls, rlp_data):
+            # convert to dict
+            # data = [TransientBlock() , total_difficulty[]
+            return dict((cls.structure[i][0], v) for i, v in enumerate(data))
