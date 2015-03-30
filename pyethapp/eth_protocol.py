@@ -34,11 +34,11 @@ class ETHProtocol(BaseProtocol):
         cmd_id = 0
 
         structure = [
-            ('eth_version', rlp.seden.big_endian_int),
-            ('network_id', rlp.seden.big_endian_int),
-            ('total_difficulty', rlp.seden.big_endian_int),
-            ('chain_head_hash', rlp.seden.binary),
-            ('genesis_hash', rlp.seden.binary)]
+            ('eth_version', rlp.sedes.big_endian_int),
+            ('network_id', rlp.sedes.big_endian_int),
+            ('total_difficulty', rlp.sedes.big_endian_int),
+            ('chain_head_hash', rlp.sedes.binary),
+            ('genesis_hash', rlp.sedes.binary)]
 
         def create(self, proto, total_difficulty, head_hash, genesis_hash):
             return [proto.version, proto.network_id, total_difficulty, head_hash, genesis_hash]
@@ -53,8 +53,7 @@ class ETHProtocol(BaseProtocol):
         transaction.
         """
         cmd_id = 2
-        max_items = 1024
-        structure = [('transactions', rlp.seden.List([Transaction] * max_items))]
+        structure = [('transactions', rlp.sedes.CountableList(Transaction))]
 
         # todo: bloomfilter: so we don't send tx to the originating peer
 
@@ -68,8 +67,8 @@ class ETHProtocol(BaseProtocol):
         cmd_id = 3
 
         structure = [
-            ('child_block_hash', rlp.seden.binary),
-            ('max_blocks', rlp.seden.big_endian_int),
+            ('child_block_hash', rlp.sedes.binary),
+            ('max_blocks', rlp.sedes.big_endian_int),
         ]
 
         def create(self, proto, child_block_hash, max_blocks):
@@ -82,8 +81,7 @@ class ETHProtocol(BaseProtocol):
         the blocks are ordered from youngest to oldest.
         """
         cmd_id = 4
-        max_items = 1024
-        structure = [('block_hashes', rlp.seden.List([rlp.seden.binary] * max_items))]
+        structure = [('block_hashes', rlp.sedes.CountableList(rlp.sedes.binary))]
 
     class getblocks(BaseProtocol.command):
 
@@ -93,13 +91,11 @@ class ETHProtocol(BaseProtocol):
         in a single message - you might have to re-request them.
         """
         cmd_id = 5
-        max_items = 1024
-        structure = [('block_hashes', rlp.seden.List([rlp.seden.binary] * max_items))]
+        structure = [('block_hashes', rlp.sedes.CountableList(rlp.sedes.binary))]
 
     class blocks(BaseProtocol.command):
         cmd_id = 6
-        max_items = 1024
-        structure = [('blocks', rlp.seden.List([Block] * max_items))]
+        structure = [('blocks', rlp.sedes.CountableList(Block))]
 
     class newblock(BaseProtocol.command):
 
@@ -110,6 +106,6 @@ class ETHProtocol(BaseProtocol):
         the format described in the main Ethereum specification.
         """
         cmd_id = 7
-        structure = [('block', Block), ('total_difficulty', rlp.seden.big_endian_int)]
+        structure = [('block', Block), ('total_difficulty', rlp.sedes.big_endian_int)]
 
         # todo: bloomfilter: so we don't send block to the originating peer
