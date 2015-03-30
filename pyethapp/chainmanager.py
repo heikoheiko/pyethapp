@@ -1,9 +1,7 @@
 import time
 from operator import attrgetter
-from pyethereum.dispatch import receiver
-from pyethereum.stoppable import StoppableLoopThread
 from pyethereum import signals
-from pyethereum.db import DB, EphemDB
+from pyethereum.db import EphemDB
 from pyethereum import utils
 import rlp
 from rlp.utils import decode_hex, encode_hex
@@ -17,6 +15,8 @@ from pyethereum.peer import MAX_GET_CHAIN_SEND_HASHES
 from pyethereum.peer import MAX_GET_CHAIN_REQUEST_BLOCKS
 from pyethereum.slogging import get_logger
 from pyethereum.chain import Chain
+from devp2p.service import WiredBaseService
+import eth_protocol
 log = get_logger('eth.chainmgr')
 
 
@@ -25,11 +25,17 @@ rlp_hash_hex = lambda data: encode_hex(utils.sha3(rlp.encode(data)))
 NUM_BLOCKS_PER_REQUEST = 256  # MAX_GET_CHAIN_REQUEST_BLOCKS
 
 
-class ChainManager(StoppableLoopThread):
+class ChainManager(WiredBaseService):
 
     """
     Manages the chain and requests to it.
     """
+    # required by BaseService
+    name = 'chain'
+    default_config = dict(chain=dict())
+
+    # required by WiredService
+    wire_protocol = eth_protocol.ETHProtocol  # create for each peer
 
     # initialized after configure:
     chain = None
@@ -38,16 +44,11 @@ class ChainManager(StoppableLoopThread):
     synchronizer = None
     config = None
 
-    def __init__(self):
+    def __init__(self, app):
+        self.config = app.config
+        self.db = app.services['db']
         super(ChainManager, self).__init__()
-
-    def configure(self, config, genesis=None, db=None):
-        config = config
-        if not db:
-            db_path = utils.db_path(config.get('misc', 'data_dir'))
-            log.info('opening chain', db_path=db_path)
-            db = DB(db_path)
-        self.chain = Chain(db, genesis, new_head_cb=self._on_new_head)
+        self.chain = Chain(self.db, new_head_cb=self._on_new_head)
         self.new_miner()
         self.synchronizer = Synchronizer(self)
 
@@ -175,120 +176,101 @@ class ChainManager(StoppableLoopThread):
         log.debug("get_transactions called")
         return self.miner.get_transactions()
 
+    # wire protocol receivers ###########
 
-chain_manager = ChainManager()
+    def on_peer_handshake(self, proto):
+        assert isinstance(proto, self.wire_protocol)
+        proto.receive_status_callbacks.append(self.receive_status)
+        proto.receive_transactions_callbacks.append(self.receive_transactions)
+        proto.receive_getblockhashes_callbacks.append(self.receive_getblockhashes)
+        proto.receive_blockhashes_callbacks.append(self.receive_blockhashes)
+        proto.receive_getblocks_callbacks.append(self.receive_getblocks)
+        proto.receive_blocks_callbacks.append(self.receive_blocks)
+        proto.receive_newblock_callbacks.append(self.receive_newblock)
 
+    def on_peer_disconnect(self, proto):
+        assert isinstance(proto, self.wire_protocol)
 
-# receivers ###########
-log_api = get_logger('chain.api')
-
-
-@receiver(signals.get_block_hashes_received)
-def handle_get_block_hashes(sender, block_hash, count, peer, **kwargs):
-    _log_api = log_api.bind(block_hash=encode_hex(block_hash))
-    _log_api.debug("handle_get_block_hashes", count=count)
-    max_hashes = min(count, MAX_GET_CHAIN_SEND_HASHES)
-    found = []
-    if not block_hash in chain_manager.chain:
-        log_api.debug("unknown block")
-        peer.send_BlockHashes([])
-    last = chain_manager.chain.get(block_hash)
-    while len(found) < max_hashes:
-        if last.has_parent():
-            last = last.get_parent()
-            found.append(last.hash)
-        else:
-            break
-    _log_api.debug("sending: found block_hashes", count=len(found))
-    with peer.lock:
+    def handle_get_block_hashes(self, proto, block_hash, count, peer, **kwargs):
+        _log = log.bind(block_hash=encode_hex(block_hash))
+        _log.debug("handle_get_block_hashes", count=count)
+        max_hashes = min(count, MAX_GET_CHAIN_SEND_HASHES)
+        found = []
+        if block_hash not in self.chain:
+            log.debug("unknown block")
+            peer.send_BlockHashes([])
+        last = self.chain.get(block_hash)
+        while len(found) < max_hashes:
+            if last.has_parent():
+                last = last.get_parent()
+                found.append(last.hash)
+            else:
+                break
+        _log.debug("sending: found block_hashes", count=len(found))
         peer.send_BlockHashes(found)
 
-
-@receiver(signals.get_blocks_received)
-def handle_get_blocks(sender, block_hashes, peer, **kwargs):
-    log_api.debug("handle_get_blocks", count=len(block_hashes))
-    found = []
-    for bh in block_hashes[:MAX_GET_CHAIN_REQUEST_BLOCKS]:
-        if bh in chain_manager.chain:
-            found.append(chain_manager.chain.get(bh))
-        else:
-            log.debug("unknown block requested", block_hash=encode_hex(bh))
-    log_api.debug("found", count=len(found))
-    with peer.lock:
+    def handle_get_blocks(self, proto, block_hashes, peer, **kwargs):
+        log.debug("handle_get_blocks", count=len(block_hashes))
+        found = []
+        for bh in block_hashes[:MAX_GET_CHAIN_REQUEST_BLOCKS]:
+            if bh in self.chain:
+                found.append(self.chain.get(bh))
+            else:
+                log.debug("unknown block requested", block_hash=encode_hex(bh))
+        log.debug("found", count=len(found))
         peer.send_Blocks(found)
 
+    def peer_status_received(self, proto, genesis_hash, peer, **kwargs):
+        log.debug("received status", remote_id=peer, genesis_hash=encode_hex(genesis_hash))
+        # check genesis
+        if genesis_hash != self.chain.genesis.hash:
+            return peer.send_Disconnect(reason='wrong genesis block')
 
-@receiver(signals.config_ready)
-def config_chainmanager(sender, config, **kwargs):
-    chain_manager.configure(config)
-
-
-@receiver(signals.peer_status_received)
-def peer_status_received(sender, genesis_hash, peer, **kwargs):
-    log_api.debug("received status", remote_id=peer, genesis_hash=encode_hex(genesis_hash))
-    # check genesis
-    if genesis_hash != chain_manager.chain.genesis.hash:
-        return peer.send_Disconnect(reason='wrong genesis block')
-
-    # request chain
-    with peer.lock:
-        chain_manager.synchronizer.synchronize_status(
+        # request chain
+        self.synchronizer.synchronize_status(
             peer, peer.status_head_hash, peer.status_total_difficulty)
-    # send transactions
-    with peer.lock:
-        log_api.debug("sending transactions", remote_id=peer)
-        transactions = chain_manager.get_transactions()
+        # send transactions
+        log.debug("sending transactions", remote_id=peer)
+        transactions = self.get_transactions()
         transactions = [rlp.decode(x.serialize()) for x in transactions]
         peer.send_Transactions(transactions)
 
+    def peer_handshake(self, proto, peer, **kwargs):
+        # reply with status if not yet sent
+        if peer.has_ethereum_capabilities() and not peer.status_sent:
+            log.debug("handshake, sending status", remote_id=peer)
+            peer.send_Status(self.chainhead.hash, self.chain.head.chain_difficulty(),
+                             self.chain.genesis.hash)
+        else:
+            log.debug("handshake, but peer has no 'eth' capablities", remote_id=peer)
 
-@receiver(signals.peer_handshake_success)
-def peer_handshake(sender, peer, **kwargs):
-    # reply with status if not yet sent
-    if peer.has_ethereum_capabilities() and not peer.status_sent:
-        log_api.debug("handshake, sending status", remote_id=peer)
-        peer.send_Status(chain_manager.chainhead.hash, chain_manager.chain.head.chain_difficulty(),
-                         chain_manager.chain.genesis.hash)
-    else:
-        log_api.debug("handshake, but peer has no 'eth' capablities", remote_id=peer)
+    def remote_transactions_received_handler(self, proto, transactions, peer, **kwargs):
+        "receives rlp.decoded serialized"
+        txl = [Transaction.deserialize(rlp.encode(tx)) for tx in transactions]
+        log.debug('remote_transactions_received', count=len(txl), remote_id=peer)
+        for tx in txl:
+            peermanager.txfilter.add(tx, peer)  # FIXME
+            self.add_transaction(tx)
 
+    def local_transaction_received_handler(self, proto, transaction, **kwargs):
+        "receives transaction object"
+        log.debug('local_transaction_received', tx_hash=transaction)
+        self.add_transaction(transaction)
 
-@receiver(signals.remote_transactions_received)
-def remote_transactions_received_handler(sender, transactions, peer, **kwargs):
-    "receives rlp.decoded serialized"
-    txl = [Transaction.deserialize(rlp.encode(tx)) for tx in transactions]
-    log_api.debug('remote_transactions_received', count=len(txl), remote_id=peer)
-    for tx in txl:
-        peermanager.txfilter.add(tx, peer)  # FIXME
-        chain_manager.add_transaction(tx)
+    def new_block_received_handler(self, proto, block, peer, **kwargs):
+        log.debug("recv new remote block", block_hash=block, remote_id=peer)
+        self.receive_chain([block], peer)
 
-
-@receiver(signals.local_transaction_received)
-def local_transaction_received_handler(sender, transaction, **kwargs):
-    "receives transaction object"
-    log_api.debug('local_transaction_received', tx_hash=transaction)
-    chain_manager.add_transaction(transaction)
-
-
-@receiver(signals.new_block_received)
-def new_block_received_handler(sender, block, peer, **kwargs):
-    log_api.debug("recv new remote block", block_hash=block, remote_id=peer)
-    chain_manager.receive_chain([block], peer)
-
-
-@receiver(signals.remote_blocks_received)
-def remote_blocks_received_handler(sender, transient_blocks, peer, **kwargs):
-    log_api.debug("recv remote blocks", count=len(transient_blocks), remote_id=peer,
+    def remote_blocks_received_handler(self, proto, transient_blocks, peer, **kwargs):
+        log.debug("recv remote blocks", count=len(transient_blocks), remote_id=peer,
                   highest_number=max(x.number for x in transient_blocks))
-    if transient_blocks:
-        chain_manager.receive_chain(transient_blocks, peer)
+        if transient_blocks:
+            self.receive_chain(transient_blocks, peer)
 
-
-@receiver(signals.remote_block_hashes_received)
-def remote_block_hashes_received_handler(sender, block_hashes, peer, **kwargs):
-    if block_hashes:
-        log_api.debug("recv remote block_hashes", count=len(block_hashes), remote_id=peer,
+    def remote_block_hashes_received_handler(self, proto, block_hashes, peer, **kwargs):
+        if block_hashes:
+            log.debug("recv remote block_hashes", count=len(block_hashes), remote_id=peer,
                       first=encode_hex(block_hashes[0]), last=encode_hex(block_hashes[-1]))
-    else:
-        log_api.debug("recv 0 remore block hashes, signifying genesis block")
-    chain_manager.synchronizer.received_block_hashes(peer, block_hashes)
+        else:
+            log.debug("recv 0 remore block hashes, signifying genesis block")
+        self.synchronizer.received_block_hashes(peer, block_hashes)
