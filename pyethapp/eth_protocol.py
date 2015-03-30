@@ -2,7 +2,7 @@ from devp2p.protocol import BaseProtocol
 from pyethereum.transactions import Transaction
 from pyethereum.blocks import Block
 import rlp
-import slogging
+from pyethereum import slogging
 log = slogging.get_logger('protocol.eth')
 
 
@@ -40,8 +40,8 @@ class ETHProtocol(BaseProtocol):
             ('chain_head_hash', rlp.sedes.binary),
             ('genesis_hash', rlp.sedes.binary)]
 
-        def create(self, proto, total_difficulty, head_hash, genesis_hash):
-            return [proto.version, proto.network_id, total_difficulty, head_hash, genesis_hash]
+        def create(self, proto, total_difficulty, chain_head_hash, genesis_hash):
+            return [proto.version, proto.network_id, total_difficulty, chain_head_hash, genesis_hash]
 
     class transactions(BaseProtocol.command):
 
