@@ -71,7 +71,7 @@ class JSONRPCServer(BaseService):
 
         self.dispatcher = LoggingDispatcher()
         # register sub dispatchers
-        for subdispatcher in (Web3, Net, Compilers, DB):
+        for subdispatcher in (Web3, Net, Compilers, DB, Chain):
             subdispatcher.register(self)
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
@@ -124,33 +124,70 @@ class Subdispatcher(object):
                             'available'.format(service_name))
                 return
             setattr(dispatcher, service_name, service)
-        json_rpc_service.dispatcher.register_instance(dispatcher, Subdispatcher.prefix)
+        json_rpc_service.dispatcher.register_instance(dispatcher, cls.prefix)
 
 
-def hex_decoder(data):
-    """Decode `data` from hex with `0x` prefix.
-    
-    :raises: :exc:`ValueErro` if `data` is not properly encoded.
-    """
+def quantity_decoder(data):
+    """Decode `data` representing a quantity."""
     if not data.startswith('0x'):
-        success = False
+        success = False  # must start with 0x prefix
+    elif data[3] == '0' and len(data) > 3:
+        success = False  # must not have leading zeros (except `0x0`)
     else:
-        data = data[2:].strip('0')
+        data = data[2:]
+        # ensure even length
         if len(data) % 2 == 1:
             data = '0' + data
         try:
+            # TODO: use py3 compatible version (e.g. rlp.utils.decode_hex)
             return data.decode('hex')
         except TypeError:
             success = False
     assert not success
-    raise BadRequestError('Invalid hex encoding')
+    raise BadRequestError('Quantity invalidly encoded')
 
 
-def hex_encoder(data):
-    """Encode binary or numerical `data` in hex with `0x` prefix."""
-    if pyethereum.utils.is_numeric(data):
-        data = pyethereum.utils.int_to_big_endian(data)
+def data_decoder(data):
+    """Decode `data` representing unformatted data."""
+    if not data.startswith('0x'):
+        success = False  # must start with 0x prefix
+    elif len(data) % 2 != 0:
+        success = False  # must be even length
+    else:
+        try:
+            # TODO: use py3 compatible version (e.g. rlp.utils.decode_hex)
+            return data[2:].decode('hex')
+        except TypeError:
+            success = False
+    assert not success
+    raise BadRequestError('Unformatted data invalidly encoded')
+
+
+def data_encoder(data):
+    """Encode unformatted binary `data`."""
     return '0x' + data.encode('hex')
+
+
+def quantity_encoder(i):
+    """Encode interger quantity `data`."""
+    if not pyethereum.utils.is_numeric(data):
+        raise TypeError('Can only encode numbers as quantites')
+    data = pyethereum.utils.int_to_big_endian(i)
+    return '0x' + data.encode('hex')
+
+def address_decoder(data):
+    """Decode an address from hex with 0x prefix to 20 bytes."""
+    addr = data_decoder(data)
+    if len(addr) != 20:
+        raise BadRequestError('Addresses must be 40 bytes long')
+    return addr
+
+def block_id_decoder(data):
+    """Decode a block identifier (either an integer or 'latest', 'earliest' or 'pending')."""
+    if data in ('latest', 'earliest', 'pending'):
+        return data
+    else:
+        return quantity_decoder(data)
 
 
 def decode_arg(name, decoder):
@@ -180,8 +217,8 @@ class Web3(Subdispatcher):
     prefix = 'web3_'
 
     @public
-    @decode_arg('data', hex_decoder)
-    @encode_res(hex_encoder)
+    @decode_arg('data', data_decoder)
+    @encode_res(data_encoder)
     def sha3(self, data):
         return pyethereum.utils.sha3(data)
 
@@ -205,7 +242,7 @@ class Net(Subdispatcher):
         raise MethodNotFoundError()
 
     @public
-    @encode_res(hex_encoder)
+    @encode_res(quantity_encoder)
     def peerCount(self):
         return len(self.peermanager.peers)
 
@@ -242,7 +279,7 @@ class Compilers(Subdispatcher):
         return self.compilers.keys()
 
     @public
-    @encode_res(hex_encoder)
+    @encode_res(data_encoder)
     def compileSolidity(self, code):
         try:
             return self.compilers['solidity'](code)
@@ -250,7 +287,7 @@ class Compilers(Subdispatcher):
             raise MethodNotFoundError()
 
     @public
-    @encode_res(hex_encoder)
+    @encode_res(data_encoder)
     def compileSerpent(self, code):
         try:
             return self.compilers['serpent'](code)
@@ -258,7 +295,7 @@ class Compilers(Subdispatcher):
             raise MethodNotFoundError()
 
     @public
-    @encode_res(hex_encoder)
+    @encode_res(data_encoder)
     def compileLLL(self, code):
         try:
             return self.compilers['lll'](code)
@@ -285,15 +322,54 @@ class DB(Subdispatcher):
             return ''
 
     @public
-    @decode_arg('value', hex_decoder)
+    @decode_arg('value', data_decoder)
     def putHex(self, db_name, key, value):
         self.db.put(db_name + key, value)
         return True
 
     @public
-    @encode_res(hex_encoder)
+    @encode_res(data_encoder)
     def getHex(self, db_name, key):
         try:
             return self.db.get(db_name + key)
         except KeyError:
             return ''
+
+
+class Chain(Subdispatcher):
+    """Subdispatcher for methods to query the block chain."""
+
+    prefix = 'eth_'
+    required_services = ['chain']
+
+    def get_block(self, block_id):
+        """Return the block identified by `block_id`.
+
+        :param block_id: either the block number as integer or 'pending',
+                         'earliest' or 'latest'
+        :raises: `ValueError` if the block does not exist
+        """
+        if block_id == 'pending':
+            assert False  # TODO
+        if block_id == 'latest':
+            return self.chain.chain.head
+        if block_id == 'earliest':
+            return self.chain.chain.genesis
+        # by number
+        try:
+            return self.chain.chain.index.get_block_by_number(block_id)
+        except KeyError:
+            raise BadParameter('Unknown block')
+
+    @public
+    @encode_res(quantity_encoder)
+    def blockNumber(self):
+        return self.chain.chain.head.number
+
+    @public
+    @decode_arg('address', address_decoder)
+    @decode_arg('block', block_id_decoder)
+    @encode_res(quantity_encoder)
+    def getBalance(address, block):
+        block = self.get_block(block)
+        return block.get_balance(address)

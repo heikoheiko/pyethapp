@@ -1,3 +1,4 @@
+from decorator import decorator
 from hashlib import md5
 import os
 from devp2p.service import BaseService
@@ -9,6 +10,13 @@ from pyethereum.slogging import get_logger
 
 slogging.set_level('db', 'debug')
 log = slogging.get_logger('db')
+
+
+@decorator
+def must_run(f, self, *args, **kwargs):
+    if not self.started:
+        raise ValueError('Service not running')
+    return f(self, *args, **kwargs)
 
 
 class LevelDB(BaseService):
@@ -34,11 +42,11 @@ class LevelDB(BaseService):
         self.stop_event.wait()
 
     def stop(self):
-        if self.started:
-            self.stop_event.set()
+        self.stop_event.set()
         # commit?
         log.info('closing db')
 
+    @must_run
     def get(self, key):
         log.trace('getting entry', key=key)
         if key in self.uncommitted:
@@ -49,10 +57,12 @@ class LevelDB(BaseService):
         self.uncommitted[key] = o
         return o
 
+    @must_run
     def put(self, key, value):
         log.trace('putting entry', key=key, value=value)
         self.uncommitted[key] = value
 
+    @must_run
     def commit(self):
         log.trace('committing', db=self)
         batch = leveldb.WriteBatch()
@@ -64,6 +74,7 @@ class LevelDB(BaseService):
         self.db.Write(batch, sync=False)
         self.uncommitted.clear()
 
+    @must_run
     def delete(self, key):
         log.trace('deleting entry', key=key)
         self.uncommitted[key] = None
@@ -75,6 +86,7 @@ class LevelDB(BaseService):
         except KeyError:
             return False
 
+    @must_run
     def __contains__(self, key):
         return self._has_key(key)
 
