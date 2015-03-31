@@ -1,5 +1,6 @@
-from pyethapp.eth_protocol import ETHProtocol
+from pyethapp.eth_protocol import ETHProtocol, TransientBlock
 from pyethereum import tester
+import rlp
 tester.disable_logging()
 
 
@@ -57,14 +58,28 @@ def test_blocks():
     _p, _d = cb_data.pop()
     assert 'blocks' in _d
     assert isinstance(_d['blocks'], list)
-    # assert isinstance(_d['blocks'][0], pyethapp.eth_protocol.TransientBlock)
+    for block in _d['blocks']:
+        assert isinstance(block, TransientBlock)
+        assert isinstance(block.transactions, rlp.LazyList)
+        assert isinstance(block.uncles, rlp.LazyList)
+        # assert that transactions and uncles have not been decoded
+        assert len(block.transactions._elements) == 0
+        assert len(block.uncles._elements) == 0
 
     # newblock
-    proto.send_blocks(block=chain.blocks[-1], total_difficulty=chain.blocks[-1].chain_difficulty())
+    approximate_difficulty = chain.blocks[-1].difficulty * 3
+    proto.send_newblock(block=chain.blocks[-1], total_difficulty=approximate_difficulty)
     packet = peer.packets.pop()
-    proto.receive_blocks_callbacks.append(cb)
-    proto._receive_blocks(packet)
+    proto.receive_newblock_callbacks.append(cb)
+    proto._receive_newblock(packet)
 
     _p, _d = cb_data.pop()
     assert 'block' in _d
     assert 'total_difficulty' in _d
+    assert _d['total_difficulty'] == approximate_difficulty
+    assert _d['block'].header == chain.blocks[-1].header
+    assert isinstance(_d['block'].transactions, rlp.LazyList)
+    assert isinstance(_d['block'].uncles, rlp.LazyList)
+    # assert that transactions and uncles have not been decoded
+    assert len(_d['block'].transactions._elements) == 0
+    assert len(_d['block'].uncles._elements) == 0
