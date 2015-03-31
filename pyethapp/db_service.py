@@ -31,6 +31,9 @@ class DBService(BaseService):
             log.warning('No db installed')
         self.db_service = dbs[impl](app)
 
+    def start(self):
+        return self.db_service.start()
+
     def _run(self):
         return self.db_service._run()
 
