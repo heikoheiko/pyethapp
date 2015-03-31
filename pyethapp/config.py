@@ -98,6 +98,10 @@ CONFIG_DIRECTORY = click.get_app_dir('pyethapp')
 CONFIG_FILENAME = os.path.join(CONFIG_DIRECTORY, 'config.yaml')
 CONTRIB_DIRECTORY = os.path.join(CONFIG_DIRECTORY, 'contrib')
 
+for _path in (CONFIG_DIRECTORY, CONTRIB_DIRECTORY):
+    if not os.path.exists(_path):
+        os.makedirs(_path)
+
 
 if os.path.exists(CONFIG_FILENAME):
     with open(CONFIG_FILENAME) as f:

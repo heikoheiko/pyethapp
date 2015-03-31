@@ -39,6 +39,7 @@ except ImportError:
 else:
     services['CodernityDB'] = CodernityDB
 
+
 @click.command()
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')
 @click.option('config_values', '-c', multiple=True, type=str,
@@ -77,7 +78,7 @@ def app(alt_config, config_values, add_services, no_services):
                 contrib_services[cls.__name__] = cls
     log.info('Loaded contrib services', services=sorted(contrib_services.keys()))
     replaced_services = set(services).intersection(set(contrib_services))
-    if  len(replaced_services) > 0:
+    if len(replaced_services) > 0:
         log.info('Replaced some built in services', services=list(replaced_services))
     services.update(contrib_services)
 
@@ -107,3 +108,6 @@ def app(alt_config, config_values, add_services, no_services):
 
     # finally stop
     app.stop()
+
+if __name__ == '__main__':
+    app()
