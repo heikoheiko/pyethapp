@@ -15,7 +15,7 @@ from pyethereum.peer import MAX_GET_CHAIN_SEND_HASHES
 from pyethereum.peer import MAX_GET_CHAIN_REQUEST_BLOCKS
 from pyethereum.slogging import get_logger
 from pyethereum.chain import Chain
-from devp2p.service import WiredBaseService
+from devp2p.service import WiredService
 import eth_protocol
 log = get_logger('eth.chainservice')
 
@@ -25,7 +25,7 @@ rlp_hash_hex = lambda data: encode_hex(utils.sha3(rlp.encode(data)))
 NUM_BLOCKS_PER_REQUEST = 256  # MAX_GET_CHAIN_REQUEST_BLOCKS
 
 
-class ChainService(WiredBaseService):
+class ChainService(WiredService):
 
     """
     Manages the chain and requests to it.
