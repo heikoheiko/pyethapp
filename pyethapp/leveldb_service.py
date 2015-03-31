@@ -21,10 +21,14 @@ class LevelDB(BaseService):
         super(LevelDB, self).__init__(app)
         self.dbfile = os.path.join(self.app.config['app']['dir'],
                                    self.app.config['db']['path'])
-        log.info('opening LevelDB', path=self.dbfile)
-        self.db = leveldb.LevelDB(self.dbfile)
+        self.db = None
         self.uncommitted = dict()
         self.stop_event = Event()
+
+    def start(self):
+        super(LevelDB, self).start()
+        log.info('opening LevelDB', path=self.dbfile)
+        self.db = leveldb.LevelDB(self.dbfile)
 
     def _run(self):
         self.stop_event.wait()

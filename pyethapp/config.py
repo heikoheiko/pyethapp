@@ -88,6 +88,8 @@ jsonrpc:
 
 db:
     path: db  # either relative to application directory or absolute
+    implementation: LevelDB
+
 
 """
 

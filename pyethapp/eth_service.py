@@ -62,7 +62,7 @@ class ChainService(WiredService):
 
     def loop_body(self):
         ts = time.time()
-        pct_cpu = self.config.getint('misc', 'mining')
+        pct_cpu = self.config['misc']['mining']
         if pct_cpu > 0:
             self.mine()
             delay = (time.time() - ts) * (100. / pct_cpu - 1)

@@ -15,6 +15,7 @@ from eth_service import ChainService
 import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
+from db_service import DBService
 
 log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
@@ -22,19 +23,8 @@ slogging.configure(config_string=':debug')
 
 # a dictionary mapping class names to the respective services
 services = {}
-for service in [NodeDiscovery, PeerManager, JSONRPCServer, ChainService]:
+for service in [NodeDiscovery, PeerManager, JSONRPCServer, ChainService, DBService]:
     services[service.name] = service
-
-# load databases if available
-try:
-    from leveldb_service import LevelDB
-    services[LevelDB.name] = LevelDB
-except ImportError:
-    try:
-        from codernitydb_service import CodernityDB
-        services[LevelDB.name] = CodernityDB
-    except ImportError:
-        raise ImportError('could neither import leveldb nor codernity')
 
 
 @click.command()
