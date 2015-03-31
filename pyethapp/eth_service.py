@@ -1,8 +1,7 @@
 import time
 from operator import attrgetter
-from pyethereum import signals
 from pyethereum.db import EphemDB
-from pyethereum import utils
+from pyethereum.utils import privtoaddr, sha3
 import rlp
 from rlp.utils import decode_hex, encode_hex
 from pyethereum import blocks
@@ -20,7 +19,7 @@ import eth_protocol
 log = get_logger('eth.chainservice')
 
 
-rlp_hash_hex = lambda data: encode_hex(utils.sha3(rlp.encode(data)))
+rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
 
 NUM_BLOCKS_PER_REQUEST = 256  # MAX_GET_CHAIN_REQUEST_BLOCKS
 
@@ -32,7 +31,7 @@ class ChainService(WiredService):
     """
     # required by BaseService
     name = 'chain'
-    default_config = dict(chain=dict())
+    default_config = dict(chain=dict(coinbase=privtoaddr(sha3('cow'))))
 
     # required by WiredService
     wire_protocol = eth_protocol.ETHProtocol  # create for each peer
@@ -59,7 +58,7 @@ class ChainService(WiredService):
         # if we are not syncing, forward all blocks
         if not self.synchronizer.synchronization_tasks:
             log.debug("broadcasting new head", block=block)
-            signals.broadcast_new_block.send(sender=None, block=block)
+            # signals.broadcast_new_block.send(sender=None, block=block)
 
     def loop_body(self):
         ts = time.time()
@@ -82,13 +81,14 @@ class ChainService(WiredService):
         blk = self.chain.head
         for i in range(8):
             for u in blk.uncles:  # assuming uncle headers
-                u = utils.sha3(rlp.encode(u))
+                u = sha3(rlp.encode(u))
                 if u in self:
                     uncles.discard(self.chain.get(u))
             if blk.has_parent():
                 blk = blk.get_parent()
 
-        coinbase = decode_hex(self.config.get('wallet', 'coinbase'))
+        coinbase = self.config['chain']['coinbase']
+        uncles = list(uncles)  # FIXME VERY MUCH !!!
         miner = Miner(self.chain.head, uncles, coinbase)
         if self.miner:
             for tx in self.miner.get_transactions():
@@ -170,8 +170,7 @@ class ChainService(WiredService):
             res = self.miner.add_transaction(transaction)
             if res:
                 _log.debug("broadcasting valid")
-                signals.send_local_transactions.send(
-                    sender=None, transactions=[transaction])
+                #signals.send_local_transactions.send(sender=None, transactions=[transaction])
             return res
 
     def get_transactions(self):
