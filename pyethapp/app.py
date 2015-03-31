@@ -23,21 +23,18 @@ slogging.configure(config_string=':debug')
 # a dictionary mapping class names to the respective services
 services = {}
 for service in [NodeDiscovery, PeerManager, JSONRPCServer, ChainService]:
-    services[service.__name__] = service
+    services[service.name] = service
 
 # load databases if available
 try:
     from leveldb_service import LevelDB
+    services[LevelDB.name] = LevelDB
 except ImportError:
-    pass
-else:
-    services['LevelDB'] = LevelDB
-try:
-    from codernitydb_service import CodernityDB
-except ImportError:
-    pass
-else:
-    services['CodernityDB'] = CodernityDB
+    try:
+        from codernitydb_service import CodernityDB
+        services[LevelDB.name] = CodernityDB
+    except ImportError:
+        raise ImportError('could neither import leveldb nor codernity')
 
 
 @click.command()
@@ -93,6 +90,7 @@ def app(alt_config, config_values, add_services, no_services):
         else:
             if name not in app.services:
                 service.register_with_app(app)
+                assert hasattr(app.services, service.name)
             else:
                 log.warning('Attempted to register service twice', service=name)
 

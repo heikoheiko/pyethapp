@@ -12,12 +12,13 @@ log = slogging.get_logger('db')
 
 
 class LevelDB(BaseService):
+
     """A service providing an interface to a level db."""
 
     name = 'db'
 
-    def start(self):
-        super(LevelDB, self).start()
+    def __init__(self, app):
+        super(LevelDB, self).__init__(app)
         self.dbfile = os.path.join(self.app.config['app']['dir'],
                                    self.app.config['db']['path'])
         log.info('opening LevelDB', path=self.dbfile)
@@ -35,7 +36,7 @@ class LevelDB(BaseService):
         log.info('closing db')
 
     def get(self, key):
-        log.debug('getting entry', key=key)
+        log.trace('getting entry', key=key)
         if key in self.uncommitted:
             if self.uncommitted[key] is None:
                 raise KeyError("key not in db")
@@ -45,11 +46,11 @@ class LevelDB(BaseService):
         return o
 
     def put(self, key, value):
-        log.debug('putting entry', key=key, value=value)
+        log.trace('putting entry', key=key, value=value)
         self.uncommitted[key] = value
 
     def commit(self):
-        log.debug('committing', db=self)
+        log.trace('committing', db=self)
         batch = leveldb.WriteBatch()
         for k, v in self.uncommitted.items():
             if v is None:
@@ -60,7 +61,7 @@ class LevelDB(BaseService):
         self.uncommitted.clear()
 
     def delete(self, key):
-        log.debug('deleting entry', key=key)
+        log.trace('deleting entry', key=key)
         self.uncommitted[key] = None
 
     def _has_key(self, key):

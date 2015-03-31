@@ -57,11 +57,11 @@ def set_config_param(s):
 default_config = """
 app:
     services:  # in order of registration (name of classes, not cls.name)
-        #- NodeDiscovery
-        #- PeerManager
-        - LevelDB
-        #- CodernityDB
-        - JSONRPCServer
+        - db
+        #- discovery
+        - peermanager
+        - chain
+        - jsonrpc
 
     # The modules in the following directories are loaded at startup.
     # Instances of BaseService found in these modules are made available as

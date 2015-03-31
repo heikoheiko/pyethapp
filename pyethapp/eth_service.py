@@ -46,8 +46,10 @@ class ChainService(WiredService):
 
     def __init__(self, app):
         self.config = app.config
-        self.db = app.services['db']
-        super(ChainService, self).__init__()
+        self.db = app.services.db
+        assert self.db is not None
+        super(ChainService, self).__init__(app)
+        log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
         self.new_miner()
         self.synchronizer = Synchronizer(self)
