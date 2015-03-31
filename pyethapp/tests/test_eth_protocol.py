@@ -1,4 +1,6 @@
 from pyethapp.eth_protocol import ETHProtocol, TransientBlock
+from devp2p.service import WiredService
+from devp2p.app import BaseApp
 from pyethereum import tester
 import rlp
 tester.disable_logging()
@@ -14,7 +16,7 @@ class PeerMock(object):
 
 def setup():
     peer = PeerMock()
-    proto = ETHProtocol(peer=peer)
+    proto = ETHProtocol(peer, WiredService(BaseApp()))
     chain = tester.state()
     cb_data = []
 

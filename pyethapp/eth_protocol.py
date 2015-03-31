@@ -17,10 +17,10 @@ class ETHProtocol(BaseProtocol):
     version = 58
     network_id = 0
 
-    def __init__(self, peer):
+    def __init__(self, peer, service):
         # required by P2PProtocol
         self.config = peer.config
-        BaseProtocol.__init__(self, peer)
+        BaseProtocol.__init__(self, peer, service)
 
     class status(BaseProtocol.command):
 
@@ -133,6 +133,7 @@ class ETHProtocol(BaseProtocol):
 
 
 class TransientBlock(object):
+
     """A partially decoded, unvalidated block."""
 
     def __init__(self, block_data):
