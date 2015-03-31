@@ -20,7 +20,7 @@ def setup():
     chain = tester.state()
     cb_data = []
 
-    def cb(proto, data):
+    def cb(proto, **data):
         cb_data.append((proto, data))
     return peer, proto, chain, cb_data, cb
 
@@ -62,10 +62,10 @@ def test_blocks():
     assert isinstance(_d['blocks'], list)
     for block in _d['blocks']:
         assert isinstance(block, TransientBlock)
-        assert isinstance(block.transactions, rlp.LazyList)
+        assert isinstance(block.transaction_list, rlp.LazyList)
         assert isinstance(block.uncles, rlp.LazyList)
         # assert that transactions and uncles have not been decoded
-        assert len(block.transactions._elements) == 0
+        assert len(block.transaction_list._elements) == 0
         assert len(block.uncles._elements) == 0
 
     # newblock
@@ -80,8 +80,8 @@ def test_blocks():
     assert 'total_difficulty' in _d
     assert _d['total_difficulty'] == approximate_difficulty
     assert _d['block'].header == chain.blocks[-1].header
-    assert isinstance(_d['block'].transactions, rlp.LazyList)
+    assert isinstance(_d['block'].transaction_list, rlp.LazyList)
     assert isinstance(_d['block'].uncles, rlp.LazyList)
     # assert that transactions and uncles have not been decoded
-    assert len(_d['block'].transactions._elements) == 0
+    assert len(_d['block'].transaction_list._elements) == 0
     assert len(_d['block'].uncles._elements) == 0
