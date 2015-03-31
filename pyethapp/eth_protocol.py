@@ -13,7 +13,7 @@ class ETHProtocol(BaseProtocol):
     https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol
     """
     protocol_id = 1
-    max_cmd_id = 16  # FIXME
+    max_cmd_id = 15  # FIXME
     name = 'eth'
     version = 59
     network_id = 0
@@ -33,6 +33,7 @@ class ETHProtocol(BaseProtocol):
         GenesisHash: The hash of the Genesis block.
         """
         cmd_id = 0
+        sent = False
 
         structure = [
             ('eth_version', rlp.sedes.big_endian_int),
@@ -42,6 +43,7 @@ class ETHProtocol(BaseProtocol):
             ('genesis_hash', rlp.sedes.binary)]
 
         def create(self, proto, total_difficulty, chain_head_hash, genesis_hash):
+            self.sent = True
             return [proto.version, proto.network_id, total_difficulty, chain_head_hash, genesis_hash]
 
     class transactions(BaseProtocol.command):

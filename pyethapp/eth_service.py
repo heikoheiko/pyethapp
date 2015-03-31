@@ -180,14 +180,23 @@ class ChainService(WiredService):
     # wire protocol receivers ###########
 
     def on_peer_handshake(self, proto):
+        log.debug('on_peer_handshake', proto=proto)
         assert isinstance(proto, self.wire_protocol)
         proto.receive_status_callbacks.append(self.receive_status)
-        proto.receive_transactions_callbacks.append(self.receive_transactions)
-        proto.receive_getblockhashes_callbacks.append(self.receive_getblockhashes)
-        proto.receive_blockhashes_callbacks.append(self.receive_blockhashes)
-        proto.receive_getblocks_callbacks.append(self.receive_getblocks)
-        proto.receive_blocks_callbacks.append(self.receive_blocks)
-        proto.receive_newblock_callbacks.append(self.receive_newblock)
+        # proto.receive_transactions_callbacks.append(self.receive_transactions)
+        # proto.receive_getblockhashes_callbacks.append(self.receive_getblockhashes)
+        # proto.receive_blockhashes_callbacks.append(self.receive_blockhashes)
+        # proto.receive_getblocks_callbacks.append(self.receive_getblocks)
+        # proto.receive_blocks_callbacks.append(self.receive_blocks)
+        # proto.receive_newblock_callbacks.append(self.receive_newblock)
+
+        # send status
+        head = self.chain.head
+        proto.send_status(total_difficulty=head.chain_difficulty(), chain_head_hash=head.hash,
+                          genesis_hash=self.chain.genesis.hash)
+
+    def receive_status(self, proto, eth_version, network_id, total_difficulty, chain_head_hash, genesis_hash):
+        log.debug('status received', proto=proto, eth_version=eth_version)
 
     def on_peer_disconnect(self, proto):
         assert isinstance(proto, self.wire_protocol)
