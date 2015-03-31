@@ -179,7 +179,7 @@ class ChainService(WiredService):
 
     # wire protocol receivers ###########
 
-    def on_peer_handshake(self, proto):
+    def on_wire_protocol_start(self, proto):
         log.debug('on_peer_handshake', proto=proto)
         assert isinstance(proto, self.wire_protocol)
         proto.receive_status_callbacks.append(self.receive_status)
