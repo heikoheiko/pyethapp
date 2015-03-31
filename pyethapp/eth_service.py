@@ -17,7 +17,7 @@ from pyethereum.slogging import get_logger
 from pyethereum.chain import Chain
 from devp2p.service import WiredBaseService
 import eth_protocol
-log = get_logger('eth.chainmgr')
+log = get_logger('eth.chainservice')
 
 
 rlp_hash_hex = lambda data: encode_hex(utils.sha3(rlp.encode(data)))
@@ -25,7 +25,7 @@ rlp_hash_hex = lambda data: encode_hex(utils.sha3(rlp.encode(data)))
 NUM_BLOCKS_PER_REQUEST = 256  # MAX_GET_CHAIN_REQUEST_BLOCKS
 
 
-class ChainManager(WiredBaseService):
+class ChainService(WiredBaseService):
 
     """
     Manages the chain and requests to it.
@@ -47,7 +47,7 @@ class ChainManager(WiredBaseService):
     def __init__(self, app):
         self.config = app.config
         self.db = app.services['db']
-        super(ChainManager, self).__init__()
+        super(ChainService, self).__init__()
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
         self.new_miner()
         self.synchronizer = Synchronizer(self)

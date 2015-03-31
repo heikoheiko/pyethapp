@@ -10,8 +10,8 @@ from gevent.event import Event
 from devp2p.service import BaseService
 from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
-import devp2p.crypto as crypto
 from devp2p.app import BaseApp
+from eth_service import ChainService
 import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
@@ -22,7 +22,7 @@ slogging.configure(config_string=':debug')
 
 # a dictionary mapping class names to the respective services
 services = {}
-for service in [NodeDiscovery, PeerManager, JSONRPCServer]:
+for service in [NodeDiscovery, PeerManager, JSONRPCServer, ChainService]:
     services[service.__name__] = service
 
 # load databases if available
