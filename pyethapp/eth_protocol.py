@@ -1,6 +1,6 @@
 from devp2p.protocol import BaseProtocol
 from pyethereum.transactions import Transaction
-from pyethereum.blocks import Block
+from pyethereum.blocks import Block, BlockHeader
 import rlp
 from pyethereum import slogging
 log = slogging.get_logger('protocol.eth')
@@ -100,7 +100,12 @@ class ETHProtocol(BaseProtocol):
         @classmethod
         def decode_payload(cls, rlp_data):
             # convert to dict
-            # data = list( of TransientBlocks with decoded headers)
+            block_data = rlp.decode_lazy(rlp_data)
+            assert len(block_data) == 1
+            blocks = []
+            for block in block_data[0]:
+                blocks.append(TransientBlock(block))
+            data = [blocks]
             return dict((cls.structure[i][0], v) for i, v in enumerate(data))
 
     class newblock(BaseProtocol.command):
@@ -119,5 +124,24 @@ class ETHProtocol(BaseProtocol):
         @classmethod
         def decode_payload(cls, rlp_data):
             # convert to dict
-            # data = [TransientBlock() , total_difficulty[]
+            ll = rlp.decode_lazy(rlp_data)
+            assert len(ll) == 2
+            transient_block = TransientBlock(ll[0])
+            difficulty = rlp.sedes.big_endian_int.deserialize(ll[1])
+            data = [transient_block, difficulty]
             return dict((cls.structure[i][0], v) for i, v in enumerate(data))
+
+
+class TransientBlock(object):
+    """A partially decoded, unvalidated block."""
+
+    def __init__(self, block_data):
+        self.header = BlockHeader.deserialize(block_data[0])
+        self.transaction_list = block_data[1]
+        self.uncles = block_data[2]
+
+    def to_block(self, db, parent=None):
+        """Convert the transient block to a :class:`pyethereum.blocks.Block`"""
+        tx_list = rlp.sedes.CountableList(Transaction).deserialize(self.transaction_list)
+        uncles = rlp.sedes.CountableList(BlockHeader).deserialize(self.uncles)
+        return Block(self.header, tx_list, uncles, db=db, parent=parent)
