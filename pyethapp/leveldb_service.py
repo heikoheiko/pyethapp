@@ -12,13 +12,6 @@ slogging.set_level('db', 'debug')
 log = slogging.get_logger('db')
 
 
-@decorator
-def must_run(f, self, *args, **kwargs):
-    if not self.started:
-        raise ValueError('Service not running')
-    return f(self, *args, **kwargs)
-
-
 class LevelDB(BaseService):
 
     """A service providing an interface to a level db."""
@@ -32,9 +25,6 @@ class LevelDB(BaseService):
         self.db = None
         self.uncommitted = dict()
         self.stop_event = Event()
-
-    def start(self):
-        super(LevelDB, self).start()
         log.info('opening LevelDB', path=self.dbfile)
         self.db = leveldb.LevelDB(self.dbfile)
 
@@ -46,7 +36,6 @@ class LevelDB(BaseService):
         # commit?
         log.info('closing db')
 
-    @must_run
     def get(self, key):
         log.trace('getting entry', key=key)
         if key in self.uncommitted:
@@ -57,12 +46,10 @@ class LevelDB(BaseService):
         self.uncommitted[key] = o
         return o
 
-    @must_run
     def put(self, key, value):
         log.trace('putting entry', key=key, value=value)
         self.uncommitted[key] = value
 
-    @must_run
     def commit(self):
         log.trace('committing', db=self)
         batch = leveldb.WriteBatch()
@@ -74,7 +61,6 @@ class LevelDB(BaseService):
         self.db.Write(batch, sync=False)
         self.uncommitted.clear()
 
-    @must_run
     def delete(self, key):
         log.trace('deleting entry', key=key)
         self.uncommitted[key] = None
@@ -86,7 +72,6 @@ class LevelDB(BaseService):
         except KeyError:
             return False
 
-    @must_run
     def __contains__(self, key):
         return self._has_key(key)
 

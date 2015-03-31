@@ -35,12 +35,8 @@ class CodernityDB(BaseService):
         self.dbfile = os.path.join(self.app.config['app']['dir'],
                                    self.app.config['db']['path'])
         self.db = None
-        self.uncommitted = {}
-        self.stop_event = Event()
-
-    def start(self):
-        super(CodernityDB, self).start()
         self.uncommitted = dict()
+        self.stop_event = Event()
         self.db = Database(self.dbfile)
         try:
             log.info('opening db', path=self.dbfile)
