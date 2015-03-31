@@ -63,7 +63,7 @@ class ChainService(WiredService):
 
     def loop_body(self):
         ts = time.time()
-        pct_cpu = self.config.getint('misc', 'mining')
+        pct_cpu = self.config['misc']['mining']
         if pct_cpu > 0:
             self.mine()
             delay = (time.time() - ts) * (100. / pct_cpu - 1)
@@ -88,7 +88,7 @@ class ChainService(WiredService):
             if blk.has_parent():
                 blk = blk.get_parent()
 
-        coinbase = decode_hex(self.config.get('wallet', 'coinbase'))
+        coinbase = self.config['wallet']['coinbase']
         miner = Miner(self.chain.head, uncles, coinbase)
         if self.miner:
             for tx in self.miner.get_transactions():
