@@ -90,6 +90,10 @@ jsonrpc:
 
 db:
     path: db  # either relative to application directory or absolute
+    implementation: LevelDB
+
+wallet:
+    coinbase_hex: "0000000000000000000000000000000000000000"
 
 """
 

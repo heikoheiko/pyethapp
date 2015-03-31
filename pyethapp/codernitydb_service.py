@@ -30,10 +30,16 @@ class CodernityDB(BaseService):
 
     name = 'db'
 
-    def start(self):
-        super(CodernityDB, self).start()
+    def __init__(self, app):
+        super(CodernityDB, self).__init__(app)
         self.dbfile = os.path.join(self.app.config['app']['dir'],
                                    self.app.config['db']['path'])
+        self.db = None
+        self.uncommitted = {}
+        self.stop_event = Event()
+
+    def start(self):
+        super(CodernityDB, self).start()
         self.uncommitted = dict()
         self.db = Database(self.dbfile)
         try:
@@ -43,7 +49,6 @@ class CodernityDB(BaseService):
             log.info('db does not exist, creating it', path=self.dbfile)
             self.db.create()
             self.db.add_index(MD5Index(self.dbfile, 'key'))
-        self.stop_event = Event()
 
     def _run(self):
         self.stop_event.wait()
