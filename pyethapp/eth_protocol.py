@@ -13,8 +13,9 @@ class ETHProtocol(BaseProtocol):
     https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol
     """
     protocol_id = 1
+    max_cmd_id = 16  # FIXME
     name = 'eth'
-    version = 58
+    version = 59
     network_id = 0
 
     def __init__(self, peer, service):
