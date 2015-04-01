@@ -1,4 +1,4 @@
-from devp2p.protocol import BaseProtocol
+from devp2p.protocol import BaseProtocol, SubProtocolError
 from pyethereum.transactions import Transaction
 from pyethereum.blocks import Block, BlockHeader
 import rlp
@@ -6,11 +6,16 @@ from pyethereum import slogging
 log = slogging.get_logger('protocol.eth')
 
 
+class ETHProtocolError(SubProtocolError):
+    pass
+
+
 class ETHProtocol(BaseProtocol):
 
     """
     DEV Ethereum Wire Protocol
     https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol
+    https://github.com/ethereum/go-ethereum/blob/develop/eth/protocol.go#L15
     """
     protocol_id = 1
     network_id = 0
@@ -47,6 +52,11 @@ class ETHProtocol(BaseProtocol):
             self.sent = True
             return [proto.version, proto.network_id, total_difficulty, chain_head_hash, genesis_hash]
 
+    class gettransactions(BaseProtocol.command):
+
+        "unused"
+        cmd_id = 1
+
     class transactions(BaseProtocol.command):
 
         """
@@ -57,7 +67,7 @@ class ETHProtocol(BaseProtocol):
         transaction.
         """
         cmd_id = 2
-        structure = [('transactions', rlp.sedes.CountableList(Transaction))]
+        structure = rlp.sedes.CountableList(Transaction)
 
         # todo: bloomfilter: so we don't send tx to the originating peer
 
@@ -72,11 +82,8 @@ class ETHProtocol(BaseProtocol):
 
         structure = [
             ('child_block_hash', rlp.sedes.binary),
-            ('max_blocks', rlp.sedes.big_endian_int),
+            ('count', rlp.sedes.big_endian_int),
         ]
-
-        def create(self, proto, child_block_hash, max_blocks):
-            return [child_block_hash, max_blocks]
 
     class blockhashes(BaseProtocol.command):
 
@@ -85,7 +92,7 @@ class ETHProtocol(BaseProtocol):
         the blocks are ordered from youngest to oldest.
         """
         cmd_id = 4
-        structure = [('block_hashes', rlp.sedes.CountableList(rlp.sedes.binary))]
+        structure = rlp.sedes.CountableList(rlp.sedes.binary)
 
     class getblocks(BaseProtocol.command):
 
@@ -95,11 +102,11 @@ class ETHProtocol(BaseProtocol):
         in a single message - you might have to re-request them.
         """
         cmd_id = 5
-        structure = [('block_hashes', rlp.sedes.CountableList(rlp.sedes.binary))]
+        structure = rlp.sedes.CountableList(rlp.sedes.binary)
 
     class blocks(BaseProtocol.command):
         cmd_id = 6
-        structure = [('blocks', rlp.sedes.CountableList(Block))]
+        structure = rlp.sedes.CountableList(Block)
 
         @classmethod
         def decode_payload(cls, rlp_data):
@@ -109,8 +116,7 @@ class ETHProtocol(BaseProtocol):
             blocks = []
             for block in block_data[0]:
                 blocks.append(TransientBlock(block))
-            data = [blocks]
-            return dict((cls.structure[i][0], v) for i, v in enumerate(data))
+            return blocks
 
     class newblock(BaseProtocol.command):
 
