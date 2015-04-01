@@ -84,6 +84,9 @@ def app(alt_config, config_values, add_services, no_services):
             else:
                 log.warning('Attempted to register service twice', service=name)
 
+    # stop on every unhandled exception!
+    gevent.get_hub().SYSTEM_ERROR = BaseException  # (KeyboardInterrupt, SystemExit, SystemError)
+
     # start app
     app.start()
 
