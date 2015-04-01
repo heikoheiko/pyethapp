@@ -13,6 +13,7 @@ class ETHProtocol(BaseProtocol):
     https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol
     """
     protocol_id = 1
+    network_id = 0
     max_cmd_id = 15  # FIXME
     name = 'eth'
     version = 59

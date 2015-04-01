@@ -1,3 +1,4 @@
+# https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
 from operator import attrgetter
 from pyethereum.db import EphemDB
@@ -197,6 +198,9 @@ class ChainService(WiredService):
 
     def receive_status(self, proto, eth_version, network_id, total_difficulty, chain_head_hash, genesis_hash):
         log.debug('status received', proto=proto, eth_version=eth_version)
+        assert eth_version == proto.version
+        assert network_id == proto.network_id
+        assert genesis_hash == self.chain.genesis.hash, genesis_hash.encode('hex')
 
     def on_peer_disconnect(self, proto):
         assert isinstance(proto, self.wire_protocol)
