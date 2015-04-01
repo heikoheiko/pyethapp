@@ -52,15 +52,20 @@ def test_blocks():
 
     # test blocks
     chain.mine(n=2)
-    proto.send_blocks(blocks=chain.blocks)
+    assert len(chain.blocks) == 3
+    proto.send_blocks(*chain.blocks)
     packet = peer.packets.pop()
-    proto.receive_blocks_callbacks.append(cb)
+    assert len(rlp.decode(packet.payload)) == 3
+
+    def list_cb(proto, blocks):  # diferent cb, as we expect a list of blocks
+        cb_data.append((proto, blocks))
+
+    proto.receive_blocks_callbacks.append(list_cb)
     proto._receive_blocks(packet)
 
-    _p, _d = cb_data.pop()
-    assert 'blocks' in _d
-    assert isinstance(_d['blocks'], list)
-    for block in _d['blocks']:
+    _p, blocks = cb_data.pop()
+    assert isinstance(blocks, list)
+    for block in blocks:
         assert isinstance(block, TransientBlock)
         assert isinstance(block.transaction_list, rlp.LazyList)
         assert isinstance(block.uncles, rlp.LazyList)

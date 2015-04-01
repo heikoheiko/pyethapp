@@ -111,10 +111,8 @@ class ETHProtocol(BaseProtocol):
         @classmethod
         def decode_payload(cls, rlp_data):
             # convert to dict
-            block_data = rlp.decode_lazy(rlp_data)
-            assert len(block_data) == 1
             blocks = []
-            for block in block_data[0]:
+            for block in rlp.decode_lazy(rlp_data):
                 blocks.append(TransientBlock(block))
             return blocks
 
