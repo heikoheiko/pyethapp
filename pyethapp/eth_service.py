@@ -102,21 +102,21 @@ class ChainService(WiredService):
                 log.debug("newly mined block is invalid!?", block_hash=block)
                 self.new_miner()
 
-    def receive_chain(self, transient_blocks, peer=None):
+    def receive_chain(self, transient_blocks, proto=None):
         _db = EphemDB()
         # assuming to receive chain order w/ oldest block first
-        transient_blocks.sort(key=attrgetter('number'))
-        assert transient_blocks[0].number <= transient_blocks[-1].number
+        transient_blocks.sort(key=lambda x: x.header.number)
+        assert transient_blocks[0].header.number <= transient_blocks[-1].header.number
 
         # notify syncer
-        self.synchronizer.received_blocks(peer, transient_blocks)
+        self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
-            log.debug('Checking PoW', block_hash=t_block.hash)
+            log.debug('Checking PoW', block_hash=t_block.header.hash)
             if not t_block.header.check_pow(_db):
-                log.debug('Invalid PoW', block_hash=t_block.hash)
+                log.debug('Invalid PoW', block_hash=t_block.header.hash)
                 continue
-            log.debug('Deserializing', block_hash=t_block.hash)
+            log.debug('Deserializing', block_hash=t_block.header.hash)
             try:
                 block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
                                      db=self.chain.db)
@@ -126,18 +126,19 @@ class ChainService(WiredService):
                 # if this fails, we need to rewind state
                 log.debug('invalid transaction', block_hash=t_block, error=e)
                 # stop current syncing of this chain and skip the child blocks
-                self.synchronizer.stop_synchronization(peer)
+                self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
-                if t_block.prevhash == blocks.GENESIS_PREVHASH:
+                if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
                     log.debug('Rec Incompatible Genesis', block_hash=t_block)
-                    if peer:
-                        peer.send_Disconnect(reason='Wrong genesis block')
+                    if proto is not None:
+                        proto.send_disconnect(reason='Wrong genesis block')
+                    raise eth_protocol.ETHProtocolError('wrong genesis')
                 else:  # should be a single newly mined block
-                    assert t_block.prevhash not in self
-                    assert t_block.prevhash != self.chain.genesis.hash
+                    assert t_block.header.prevhash not in self.chain
+                    assert t_block.header.prevhash != self.chain.genesis.hash
                     log.debug('unknown parent', block_hash=t_block,
-                              parent_hash=encode_hex(t_block.prevhash), remote_id=peer)
+                              parent_hash=encode_hex(t_block.header.prevhash), remote_id=proto)
                     if len(transient_blocks) != 1:
                         # strange situation here.
                         # we receive more than 1 block, so it's not a single newly mined one
@@ -146,10 +147,10 @@ class ChainService(WiredService):
                         # we should disconnect!
                         log.warn(
                             'blocks received, but unknown parent.', num=len(transient_blocks))
-                    if peer:
+                    if proto is not None:
                         # request chain for newest known hash
                         self.synchronizer.synchronize_unknown_block(
-                            peer, transient_blocks[-1].hash)
+                            proto, transient_blocks[-1].header.hash)
                 break
             if block.hash in self.chain:
                 log.debug('known', block_hash=block)
@@ -271,6 +272,6 @@ class ChainService(WiredService):
         if transient_blocks:
             self.receive_chain(transient_blocks, proto)
 
-    def on_receive_newblock(self, proto, block):
+    def on_receive_newblock(self, proto, block, total_difficulty):
         log.debug("recv new remote block", block=block, remote_id=proto)
         self.receive_chain([block], proto)

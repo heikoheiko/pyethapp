@@ -2,6 +2,7 @@ from devp2p.protocol import BaseProtocol, SubProtocolError
 from pyethereum.transactions import Transaction
 from pyethereum.blocks import Block, BlockHeader
 import rlp
+import gevent
 from pyethereum import slogging
 log = slogging.get_logger('protocol.eth')
 
