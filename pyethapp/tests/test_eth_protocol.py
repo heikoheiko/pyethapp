@@ -1,5 +1,6 @@
 from pyethapp.eth_protocol import ETHProtocol, TransientBlock
 from devp2p.service import WiredService
+from devp2p.protocol import BaseProtocol
 from devp2p.app import BaseApp
 from pyethereum import tester
 import rlp
@@ -23,6 +24,20 @@ def setup():
     def cb(proto, **data):
         cb_data.append((proto, data))
     return peer, proto, chain, cb_data, cb
+
+
+def test_basics():
+    peer, proto, chain, cb_data, cb = setup()
+
+    assert isinstance(proto, BaseProtocol)
+
+    d = dict()
+    d[proto] = 1
+    assert proto in d
+    assert d[proto] == 1
+    assert not proto
+    proto.start()
+    assert proto
 
 
 def test_status():
