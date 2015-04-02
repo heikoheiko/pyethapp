@@ -3,6 +3,7 @@ from pyethapp import monkeypatches
 from pyethereum.db import EphemDB
 from pyethapp import eth_service
 from pyethapp import leveldb_service
+from pyethapp import codernitydb_service
 from pyethapp import eth_protocol
 from pyethereum import slogging
 import rlp
@@ -74,10 +75,12 @@ def test_receive_newblock():
     eth.on_receive_newblock(proto, **d)
 
 
-def receive_blocks(rlp_data, leveldb=False):
+def receive_blocks(rlp_data, leveldb=False, codernitydb=False):
     app = AppMock()
     if leveldb:
         app.db = leveldb_service.LevelDB(app)
+    if codernitydb:
+        app.db = codernitydb_service.CodernityDB(app)
 
     eth = eth_service.ChainService(app)
     proto = eth_protocol.ETHProtocol(PeerMock(app), eth)
