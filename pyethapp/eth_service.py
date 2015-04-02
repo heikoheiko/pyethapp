@@ -1,6 +1,5 @@
 # https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
-from operator import attrgetter
 from pyethereum.db import EphemDB
 from pyethereum.utils import privtoaddr, sha3
 import rlp
@@ -121,9 +120,9 @@ class ChainService(WiredService):
             log.debug('Deserializing', block=t_block.hex_hash,
                       parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
             if t_block.header.prevhash == self.chain.head.hash:
-                log.debug('is child')
+                log.trace('is child')
             if t_block.header.prevhash == self.chain.genesis.hash:
-                log.debug('is child of genesis')
+                log.trace('is child of genesis')
             try:
                 # block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
                 #                      db=self.chain.db)
@@ -169,7 +168,6 @@ class ChainService(WiredService):
                 assert block.has_parent()
                 # assume single block is newly mined block
                 success = self.chain.add_block(block)
-                assert self.chain.head
                 if success:
                     log.debug('added', block=block)
 
@@ -193,8 +191,6 @@ class ChainService(WiredService):
         assert isinstance(proto, self.wire_protocol)
         proto.receive_status_callbacks.append(self.on_receive_status)
         proto.receive_transactions_callbacks.append(self.on_receive_transactions)
-        proto.send_GetBlockHashes = proto.send_getblockhashes  # FIXME, hack for pyethereum sync
-        proto.send_GetBlocks = proto.send_getblocks  # FIXME, hack for pyethereum sync
         proto.receive_getblockhashes_callbacks.append(self.on_receive_getblockhashes)
         proto.receive_blockhashes_callbacks.append(self.on_receive_blockhashes)
         proto.receive_getblocks_callbacks.append(self.on_receive_getblocks)
