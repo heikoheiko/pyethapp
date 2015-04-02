@@ -1,4 +1,5 @@
 from importlib import import_module
+import monkeypatches
 import inspect
 import sys
 import os

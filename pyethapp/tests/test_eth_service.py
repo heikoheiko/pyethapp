@@ -1,3 +1,4 @@
+from pyethapp import monkeypatches
 from pyethereum.db import EphemDB
 from pyethapp import eth_service
 from pyethapp import leveldb_service
