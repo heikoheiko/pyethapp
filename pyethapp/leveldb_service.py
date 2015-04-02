@@ -1,15 +1,13 @@
-from decorator import decorator
-from hashlib import md5
 import os
 from devp2p.service import BaseService
 from gevent.event import Event
 import leveldb
-from pyethereum import compress
 from pyethereum import slogging
-from pyethereum.slogging import get_logger
 
 slogging.set_level('db', 'debug')
 log = slogging.get_logger('db')
+
+compress = decompress = lambda x: x
 
 
 class LevelDB(BaseService):
@@ -37,27 +35,29 @@ class LevelDB(BaseService):
         log.info('closing db')
 
     def get(self, key):
-        log.trace('getting entry', key=key)
+        log.trace('getting entry', key=key.encode('hex')[:8])
         if key in self.uncommitted:
             if self.uncommitted[key] is None:
                 raise KeyError("key not in db")
+            log.trace('from uncommited')
             return self.uncommitted[key]
-        o = compress.decompress(self.db.Get(key))
+        log.trace('from db')
+        o = decompress(self.db.Get(key))
         self.uncommitted[key] = o
         return o
 
     def put(self, key, value):
-        log.trace('putting entry', key=key, value=value)
+        log.trace('putting entry', key=key.encode('hex')[:8], len=len(value))
         self.uncommitted[key] = value
 
     def commit(self):
-        log.trace('committing', db=self)
+        log.debug('committing', db=self)
         batch = leveldb.WriteBatch()
         for k, v in self.uncommitted.items():
             if v is None:
                 batch.Delete(k)
             else:
-                batch.Put(k, compress.compress(v))
+                batch.Put(k, compress(v))
         self.db.Write(batch, sync=False)
         self.uncommitted.clear()
 

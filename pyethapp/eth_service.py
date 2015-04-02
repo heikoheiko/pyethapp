@@ -4,7 +4,7 @@ from operator import attrgetter
 from pyethereum.db import EphemDB
 from pyethereum.utils import privtoaddr, sha3
 import rlp
-from rlp.utils import decode_hex, encode_hex
+from rlp.utils import encode_hex
 from pyethereum import blocks
 from pyethereum import processblock
 from pyethereum.miner import Miner

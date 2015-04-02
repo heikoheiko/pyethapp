@@ -17,9 +17,8 @@ import pyethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
 from db_service import DBService
-
-log = slogging.get_logger('app')
 slogging.configure(config_string=':debug')
+log = slogging.get_logger('app')
 
 
 # a dictionary mapping class names to the respective services
