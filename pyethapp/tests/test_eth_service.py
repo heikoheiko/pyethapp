@@ -64,10 +64,19 @@ def test_receive_newblock():
     eth.on_receive_newblock(proto, **d)
 
 
-def test_receive_blocks():
+def receive_blocks(rlp_data):
     app = AppMock()
     eth = eth_service.ChainService(app)
     proto = eth_protocol.ETHProtocol(PeerMock(app), eth)
-    rlp_data = rlp.encode([rlp.decode(block_1.decode('hex'))])
     b = eth_protocol.ETHProtocol.blocks.decode_payload(rlp_data)
     eth.on_receive_blocks(proto, b)
+
+
+def test_receive_block1():
+    rlp_data = rlp.encode([rlp.decode(block_1.decode('hex'))])
+    receive_blocks(rlp_data)
+
+
+def test_receive_blocks_256():
+    data = open('blocks256.hex.rlp').read()
+    receive_blocks(data.decode('hex'))
