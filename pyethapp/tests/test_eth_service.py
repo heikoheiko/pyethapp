@@ -1,3 +1,4 @@
+import os
 from pyethapp import monkeypatches
 from pyethereum.db import EphemDB
 from pyethapp import eth_service
@@ -60,6 +61,11 @@ block_1 = (
     "504edf5c5853b248700e0789c8872cf25e7727307bac0c0")
 
 
+fn = 'blocks256.hex.rlp'
+p = os.path.join(os.path.dirname(__file__), fn)
+data256 = open(p).read()
+
+
 def test_receive_newblock():
     app = AppMock()
     eth = eth_service.ChainService(app)
@@ -85,10 +91,8 @@ def test_receive_block1():
 
 
 def test_receive_blocks_256():
-    data = open('blocks256.hex.rlp').read()
-    receive_blocks(data.decode('hex'))
+    receive_blocks(data256.decode('hex'))
 
 
 def test_receive_blocks_256_leveldb():
-    data = open('blocks256.hex.rlp').read()
-    receive_blocks(data.decode('hex'), leveldb=True)
+    receive_blocks(data256.decode('hex'), leveldb=True)
