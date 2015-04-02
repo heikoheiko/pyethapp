@@ -22,7 +22,7 @@ class ETHProtocol(BaseProtocol):
     network_id = 0
     max_cmd_id = 15  # FIXME
     name = 'eth'
-    version = 59
+    version = 60
     network_id = 0
 
     def __init__(self, peer, service):
