@@ -112,32 +112,40 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
-            log.debug('Checking PoW', block_hash=t_block.header.hash)
+            log.debug('Checking PoW', block=t_block.hex_hash)
             if not t_block.header.check_pow(_db):
-                log.debug('Invalid PoW', block_hash=t_block.header.hash)
+                log.debug('Invalid PoW', block=t_block.hex_hash)
                 continue
-            log.debug('Deserializing', block_hash=t_block.header.hash)
+            log.debug('Deserializing', block=t_block.hex_hash)
+            if t_block.header.prevhash == self.chain.head.hash:
+                log.debug('is child')
+            if t_block.header.prevhash == self.chain.genesis.hash:
+                log.debug('is child of genesis')
             try:
-                block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
-                                     db=self.chain.db)
+                # block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
+                #                      db=self.chain.db)
+                block = t_block.to_block(db=self.chain.db)
             except processblock.InvalidTransaction as e:
                 # FIXME there might be another exception in
                 # blocks.deserializeChild when replaying transactions
                 # if this fails, we need to rewind state
-                log.debug('invalid transaction', block_hash=t_block, error=e)
+                log.debug('invalid transaction', block=t_block.hex_hash, error=e)
                 # stop current syncing of this chain and skip the child blocks
                 self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
+                log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
-                    log.debug('Rec Incompatible Genesis', block_hash=t_block)
+                    log.debug('Rec Incompatible Genesis', block=t_block.hex_hash)
                     if proto is not None:
                         proto.send_disconnect(reason='Wrong genesis block')
                     raise eth_protocol.ETHProtocolError('wrong genesis')
                 else:  # should be a single newly mined block
                     assert t_block.header.prevhash not in self.chain
+                    if t_block.header.prevhash == self.chain.genesis.hash:
+                        print t_block.serialize().encode('hex')
                     assert t_block.header.prevhash != self.chain.genesis.hash
-                    log.debug('unknown parent', block_hash=t_block,
+                    log.debug('unknown parent', block=t_block,
                               parent_hash=encode_hex(t_block.header.prevhash), remote_id=proto)
                     if len(transient_blocks) != 1:
                         # strange situation here.
@@ -153,13 +161,13 @@ class ChainService(WiredService):
                             proto, transient_blocks[-1].header.hash)
                 break
             if block.hash in self.chain:
-                log.debug('known', block_hash=block)
+                log.debug('known', block=block)
             else:
                 assert block.has_parent()
                 # assume single block is newly mined block
                 success = self.chain.add_block(block)
                 if success:
-                    log.debug('added', block_hash=block)
+                    log.debug('added', block=block)
 
     def add_transaction(self, transaction):
         _log = log.bind(tx_hash=transaction)
@@ -247,11 +255,11 @@ class ChainService(WiredService):
 
     def on_receive_blockhashes(self, proto, block_hashes):
         if block_hashes:
-            log.debug("recv remote block_hashes", count=len(block_hashes), remote_id=proto,
+            log.debug("on_receive_blockhashes", count=len(block_hashes), remote_id=proto,
                       first=encode_hex(block_hashes[0]), last=encode_hex(block_hashes[-1]))
         else:
             log.debug("recv 0 remote block hashes, signifying genesis block")
-        self.synchronizer.received_block_hashes(proto.peer, block_hashes)
+        self.synchronizer.received_block_hashes(proto, block_hashes)
 
     # blocks ################
 
