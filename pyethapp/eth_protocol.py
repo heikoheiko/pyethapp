@@ -72,6 +72,16 @@ class ETHProtocol(BaseProtocol):
 
         # todo: bloomfilter: so we don't send tx to the originating peer
 
+        @classmethod
+        def decode_payload(cls, rlp_data):
+            # convert to dict
+            txs = []
+            for i, tx in enumerate(rlp.decode_lazy(rlp_data)):
+                txs.append(Transaction.deserialize(tx))
+                if not i % 10:
+                    gevent.sleep(0.0001)
+            return txs
+
     class getblockhashes(BaseProtocol.command):
 
         """
@@ -155,3 +165,10 @@ class TransientBlock(object):
         tx_list = rlp.sedes.CountableList(Transaction).deserialize(self.transaction_list)
         uncles = rlp.sedes.CountableList(BlockHeader).deserialize(self.uncles)
         return Block(self.header, tx_list, uncles, db=db, parent=parent)
+
+    def serialize(self):
+        return rlp.encode([self.header.serialize(self.header), self.transaction_list, self.uncles])
+
+    @property
+    def hex_hash(self):
+        return self.header.hex_hash()
