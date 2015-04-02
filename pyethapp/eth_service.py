@@ -56,6 +56,7 @@ class ChainService(WiredService):
     def _on_new_head(self, block):
         # self.new_miner()  # reset mining  FIXME
         # if we are not syncing, forward all blocks
+        log.debug("_on_new_head called", block=block)
         if not self.synchronizer.synchronization_tasks:
             log.debug("broadcasting new head", block=block)
             # signals.broadcast_new_block.send(sender=None, block=block)  # FIXME
@@ -138,7 +139,7 @@ class ChainService(WiredService):
             except blocks.UnknownParentException:
                 log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
-                    log.debug('Rec Incompatible Genesis', block=t_block.hex_hash)
+                    log.debug('wrong genesis', block=t_block.hex_hash)
                     if proto is not None:
                         proto.send_disconnect(reason='Wrong genesis block')
                     raise eth_protocol.ETHProtocolError('wrong genesis')
@@ -168,6 +169,7 @@ class ChainService(WiredService):
                 assert block.has_parent()
                 # assume single block is newly mined block
                 success = self.chain.add_block(block)
+                assert self.chain.head
                 if success:
                     log.debug('added', block=block)
 
