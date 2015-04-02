@@ -1,18 +1,21 @@
 from pyethereum.db import EphemDB
 from pyethapp import eth_service
+from pyethapp import leveldb_service
 from pyethapp import eth_protocol
 from pyethereum import slogging
 import rlp
+import tempfile
 slogging.configure(config_string=':info')
 
 
 class AppMock(object):
 
+    config = dict(app=dict(dir=tempfile.gettempdir()), db=dict(path='_db'))
+
     class Services(object):
         pass
 
-    def __init__(self):
-        self.config = dict()
+    def __init__(self, db=None):
         self.services = self.Services()
         self.services.db = EphemDB()
 
@@ -64,8 +67,11 @@ def test_receive_newblock():
     eth.on_receive_newblock(proto, **d)
 
 
-def receive_blocks(rlp_data):
+def receive_blocks(rlp_data, leveldb=False):
     app = AppMock()
+    if leveldb:
+        app.db = leveldb_service.LevelDB(app)
+
     eth = eth_service.ChainService(app)
     proto = eth_protocol.ETHProtocol(PeerMock(app), eth)
     b = eth_protocol.ETHProtocol.blocks.decode_payload(rlp_data)
@@ -80,3 +86,8 @@ def test_receive_block1():
 def test_receive_blocks_256():
     data = open('blocks256.hex.rlp').read()
     receive_blocks(data.decode('hex'))
+
+
+def test_receive_blocks_256_leveldb():
+    data = open('blocks256.hex.rlp').read()
+    receive_blocks(data.decode('hex'), leveldb=True)
