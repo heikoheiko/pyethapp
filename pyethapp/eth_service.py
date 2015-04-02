@@ -49,15 +49,16 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
+
         self.new_miner()
         self.synchronizer = Synchronizer(self.chain)
 
     def _on_new_head(self, block):
-        self.new_miner()  # reset mining
+        # self.new_miner()  # reset mining  FIXME
         # if we are not syncing, forward all blocks
         if not self.synchronizer.synchronization_tasks:
             log.debug("broadcasting new head", block=block)
-            # signals.broadcast_new_block.send(sender=None, block=block)
+            # signals.broadcast_new_block.send(sender=None, block=block)  # FIXME
 
     def loop_body(self):
         ts = time.time()
@@ -116,7 +117,8 @@ class ChainService(WiredService):
             if not t_block.header.check_pow(_db):
                 log.debug('Invalid PoW', block=t_block.hex_hash)
                 continue
-            log.debug('Deserializing', block=t_block.hex_hash)
+            log.debug('Deserializing', block=t_block.hex_hash,
+                      parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
             if t_block.header.prevhash == self.chain.head.hash:
                 log.debug('is child')
             if t_block.header.prevhash == self.chain.genesis.hash:
