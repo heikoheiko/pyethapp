@@ -28,7 +28,6 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read().replace('.. :changelog:', '')
 
-requirements = [x.strip() for x in open('requirements.txt')]
 
 test_requirements = []
 
@@ -46,7 +45,6 @@ setup(
     package_dir={'pyethapp':
                  'pyethapp'},
     include_package_data=True,
-    install_requires=requirements,
     license="BSD",
     zip_safe=False,
     keywords='pyethapp',

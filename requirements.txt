@@ -2,7 +2,9 @@ CodernityDB
 click
 decorator
 gevent
-devp2p
+-e git://github.com/heikoheiko/pydevp2p@master#egg=devp2p-master
+-e git://github.com/ethereum/pyethereum@develop#egg=pyethereum-origin_develop
+-e git://github.com/ethereum/pyrlp@develop#egg=rlp-origin_develop
 pyethereum
 wheel
 pyyaml
