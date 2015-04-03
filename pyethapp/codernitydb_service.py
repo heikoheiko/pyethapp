@@ -1,7 +1,7 @@
 from hashlib import md5
 import os
 from CodernityDB.database import Database, DatabasePathException,  \
-                                RecordNotFound
+    RecordNotFound
 from CodernityDB.hash_index import HashIndex
 from devp2p.service import BaseService
 from gevent.event import Event
@@ -26,9 +26,11 @@ class MD5Index(HashIndex):
 
 
 class CodernityDB(BaseService):
+
     """A service providing a codernity db interface."""
 
     name = 'db'
+    default_config = dict(db=dict(path=''), app=dict(dir=''))
 
     def __init__(self, app):
         super(CodernityDB, self).__init__(app)

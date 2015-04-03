@@ -15,6 +15,7 @@ class LevelDB(BaseService):
     """A service providing an interface to a level db."""
 
     name = 'db'
+    default_config = dict(db=dict(path=''), app=dict(dir=''))
 
     def __init__(self, app):
         super(LevelDB, self).__init__(app)

@@ -23,6 +23,7 @@ else:
 class DBService(BaseService):
 
     name = 'db'
+    default_config = dict(db=dict(implementation='LevelDB'))
 
     def __init__(self, app):
         super(DBService, self).__init__(app)
