@@ -145,6 +145,7 @@ class ETHProtocol(BaseProtocol):
         @classmethod
         def decode_payload(cls, rlp_data):
             # convert to dict
+            # print rlp_data.encode('hex')
             ll = rlp.decode_lazy(rlp_data)
             assert len(ll) == 2
             transient_block = TransientBlock(ll[0])
@@ -174,3 +175,6 @@ class TransientBlock(object):
     @property
     def hex_hash(self):
         return self.header.hex_hash()
+
+    def __repr__(self):
+        return '<TransientBlock(#%d %s)>' % (self.header.number, self.header.hash.encode('hex')[:8])

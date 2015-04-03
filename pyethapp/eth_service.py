@@ -48,14 +48,12 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
-
         self.new_miner()
         self.synchronizer = Synchronizer(self.chain)
 
     def _on_new_head(self, block):
-        # self.new_miner()  # reset mining  FIXME
+        self.new_miner()  # reset mining  FIXME
         # if we are not syncing, forward all blocks
-        log.debug("_on_new_head called", block=block)
         if not self.synchronizer.synchronization_tasks:
             log.debug("broadcasting new head", block=block)
             # signals.broadcast_new_block.send(sender=None, block=block)  # FIXME
@@ -81,8 +79,9 @@ class ChainService(WiredService):
         blk = self.chain.head
         for i in range(8):
             for u in blk.uncles:  # assuming uncle headers
-                u = sha3(rlp.encode(u))
-                if u in self:
+                assert isinstance(u, blocks.BlockHeader)
+                u = u.hash
+                if u in self.chain:
                     uncles.discard(self.chain.get(u))
             if blk.has_parent():
                 blk = blk.get_parent()
@@ -113,11 +112,11 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
-            log.debug('Checking PoW', block=t_block.hex_hash)
+            log.debug('Checking PoW', block=t_block)
             if not t_block.header.check_pow(_db):
-                log.debug('Invalid PoW', block=t_block.hex_hash)
+                log.debug('Invalid PoW', block=t_block)
                 continue
-            log.debug('Deserializing', block=t_block.hex_hash,
+            log.debug('Deserializing', block=t_block,
                       parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
             if t_block.header.prevhash == self.chain.head.hash:
                 log.trace('is child')
@@ -131,14 +130,14 @@ class ChainService(WiredService):
                 # FIXME there might be another exception in
                 # blocks.deserializeChild when replaying transactions
                 # if this fails, we need to rewind state
-                log.debug('invalid transaction', block=t_block.hex_hash, error=e)
+                log.debug('invalid transaction', block=t_block, error=e)
                 # stop current syncing of this chain and skip the child blocks
                 self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
                 log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
-                    log.debug('wrong genesis', block=t_block.hex_hash)
+                    log.debug('wrong genesis', block=t_block)
                     if proto is not None:
                         proto.send_disconnect(reason='Wrong genesis block')
                     raise eth_protocol.ETHProtocolError('wrong genesis')
@@ -170,13 +169,15 @@ class ChainService(WiredService):
                 success = self.chain.add_block(block)
                 if success:
                     log.debug('added', block=block)
+                else:
+                    raise eth_protocol.ETHProtocolError('could not add block')
 
     def add_transaction(self, transaction):
-        _log = log.bind(tx_hash=transaction)
-        _log.debug("add transaction")
+        log.debug("add transaction", tx_hash=transaction)
         res = self.miner.add_transaction(transaction)
         if res:
-            _log.debug("broadcasting valid")
+            log.debug("broadcasting valid", tx_hash=transaction)
+            # FIXME
             #signals.send_local_transactions.send(sender=None, transactions=[transaction])
         return res
 
@@ -189,6 +190,7 @@ class ChainService(WiredService):
     def on_wire_protocol_start(self, proto):
         log.debug('on_wire_protocol_start', proto=proto)
         assert isinstance(proto, self.wire_protocol)
+        # register callbacks
         proto.receive_status_callbacks.append(self.on_receive_status)
         proto.receive_transactions_callbacks.append(self.on_receive_transactions)
         proto.receive_getblockhashes_callbacks.append(self.on_receive_getblockhashes)
