@@ -46,7 +46,7 @@ setup(
     long_description=readme + '\n\n' + history,
     author="HeikoHeiko",
     author_email='heiko@ethdev.com',
-    url='https://github.com/heikoheiko/pyethapp',
+    url='https://github.com/ethereum/pyethapp',
     packages=[
         'pyethapp',
     ],
