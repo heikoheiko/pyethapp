@@ -5,7 +5,6 @@ in the platform dependant application directory. If the file doesn't exist, it
 puts an example config there (not functional at the moment).
 """
 
-import errno
 import os
 import click
 from devp2p import crypto

@@ -1,15 +1,15 @@
 # https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
-from pyethereum.db import EphemDB
-from pyethereum.utils import privtoaddr, sha3
+from ethereum.db import EphemDB
+from ethereum.utils import privtoaddr, sha3
 import rlp
 from rlp.utils import encode_hex
-from pyethereum import blocks
-from pyethereum import processblock
-from pyethereum.miner import Miner
+from ethereum import blocks
+from ethereum import processblock
+from ethereum.miner import Miner
 from blockpool import Synchronizer
-from pyethereum.slogging import get_logger
-from pyethereum.chain import Chain
+from ethereum.slogging import get_logger
+from ethereum.chain import Chain
 from devp2p.service import WiredService
 import eth_protocol
 log = get_logger('eth.chainservice')

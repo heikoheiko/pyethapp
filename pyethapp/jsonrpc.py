@@ -3,15 +3,14 @@ import inspect
 import gevent
 import gevent.wsgi
 import gevent.queue
-from gevent.event import Event
 from tinyrpc.dispatch import RPCDispatcher
 from tinyrpc.dispatch import public as public_
 from tinyrpc.exc import BadRequestError, MethodNotFoundError
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol, JSONRPCInvalidParamsError
 from tinyrpc.server.gevent import RPCServerGreenlets
 from tinyrpc.transports.wsgi import WsgiServerTransport
-import pyethereum.utils
-import pyethereum.slogging as slogging
+import ethereum.utils
+import ethereum.slogging as slogging
 from devp2p.service import BaseService
 
 log = slogging.get_logger('jsonrpc')
@@ -34,6 +33,7 @@ def public(f):
 
 
 class LoggingDispatcher(RPCDispatcher):
+
     """A dispatcher that logs every RPC method call."""
 
     def __init__(self):
@@ -52,6 +52,7 @@ class LoggingDispatcher(RPCDispatcher):
 
 
 class JSONRPCServer(BaseService):
+
     """Service providing an HTTP server with JSON RPC interface.
 
     Other services can extend the JSON RPC interface by creating a
@@ -96,6 +97,7 @@ class JSONRPCServer(BaseService):
 
 
 class Subdispatcher(object):
+
     """A JSON RPC subdispatcher which can be registered at JSONRPCService.
 
     :cvar prefix: common prefix shared by all rpc methods implemented by this
@@ -170,10 +172,11 @@ def data_encoder(data):
 
 def quantity_encoder(i):
     """Encode interger quantity `data`."""
-    if not pyethereum.utils.is_numeric(data):
+    if not ethereum.utils.is_numeric(data):
         raise TypeError('Can only encode numbers as quantites')
-    data = pyethereum.utils.int_to_big_endian(i)
+    data = ethereum.utils.int_to_big_endian(i)
     return '0x' + data.encode('hex')
+
 
 def address_decoder(data):
     """Decode an address from hex with 0x prefix to 20 bytes."""
@@ -181,6 +184,7 @@ def address_decoder(data):
     if len(addr) != 20:
         raise BadRequestError('Addresses must be 40 bytes long')
     return addr
+
 
 def block_id_decoder(data):
     """Decode a block identifier (either an integer or 'latest', 'earliest' or 'pending')."""
@@ -212,6 +216,7 @@ def encode_res(encoder):
 
 
 class Web3(Subdispatcher):
+
     """Subdispatcher for some generic RPC methods."""
 
     prefix = 'web3_'
@@ -220,7 +225,7 @@ class Web3(Subdispatcher):
     @decode_arg('data', data_decoder)
     @encode_res(data_encoder)
     def sha3(self, data):
-        return pyethereum.utils.sha3(data)
+        return ethereum.utils.sha3(data)
 
     @public
     def clientVersion(self):
@@ -228,6 +233,7 @@ class Web3(Subdispatcher):
 
 
 class Net(Subdispatcher):
+
     """Subdispatcher for network related RPC methods."""
 
     prefix = 'net_'
@@ -248,6 +254,7 @@ class Net(Subdispatcher):
 
 
 class Compilers(Subdispatcher):
+
     """Subdispatcher for compiler related RPC methods."""
 
     prefix = 'eth_'
@@ -304,6 +311,7 @@ class Compilers(Subdispatcher):
 
 
 class DB(Subdispatcher):
+
     """Subdispatcher providing database related RPC methods."""
 
     prefix = 'db_'
@@ -337,6 +345,7 @@ class DB(Subdispatcher):
 
 
 class Chain(Subdispatcher):
+
     """Subdispatcher for methods to query the block chain."""
 
     prefix = 'eth_'

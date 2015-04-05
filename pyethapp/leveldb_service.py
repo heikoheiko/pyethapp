@@ -2,7 +2,7 @@ import os
 from devp2p.service import BaseService
 from gevent.event import Event
 import leveldb
-from pyethereum import slogging
+from ethereum import slogging
 
 slogging.set_level('db', 'debug')
 log = slogging.get_logger('db')

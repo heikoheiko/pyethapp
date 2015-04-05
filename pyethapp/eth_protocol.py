@@ -1,9 +1,9 @@
 from devp2p.protocol import BaseProtocol, SubProtocolError
-from pyethereum.transactions import Transaction
-from pyethereum.blocks import Block, BlockHeader
+from ethereum.transactions import Transaction
+from ethereum.blocks import Block, BlockHeader
 import rlp
 import gevent
-from pyethereum import slogging
+from ethereum import slogging
 log = slogging.get_logger('protocol.eth')
 
 
@@ -164,7 +164,7 @@ class TransientBlock(object):
         self.uncles = block_data[2]
 
     def to_block(self, db, parent=None):
-        """Convert the transient block to a :class:`pyethereum.blocks.Block`"""
+        """Convert the transient block to a :class:`ethereum.blocks.Block`"""
         tx_list = rlp.sedes.CountableList(Transaction).deserialize(self.transaction_list)
         uncles = rlp.sedes.CountableList(BlockHeader).deserialize(self.uncles)
         return Block(self.header, tx_list, uncles, db=db, parent=parent)

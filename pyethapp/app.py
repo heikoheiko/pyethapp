@@ -13,7 +13,7 @@ from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 from devp2p.app import BaseApp
 from eth_service import ChainService
-import pyethereum.slogging as slogging
+import ethereum.slogging as slogging
 from config import config, load_config, set_config_param
 from jsonrpc import JSONRPCServer
 from db_service import DBService
