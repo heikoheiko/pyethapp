@@ -150,6 +150,13 @@ def quantity_decoder(data):
     raise BadRequestError('Invalid quantity encoding')
 
 
+def quantity_encoder(i):
+    """Encode interger quantity `data`."""
+    assert is_numeric(i)
+    data = int_to_big_endian(i)
+    return '0x' + (encode_hex(data).lstrip('0') or '0')
+
+
 def data_decoder(data):
     """Decode `data` representing unformatted data."""
     if not data.startswith('0x'):
@@ -168,14 +175,7 @@ def data_decoder(data):
 
 def data_encoder(data):
     """Encode unformatted binary `data`."""
-    return '0x' + data.encode('hex')
-
-
-def quantity_encoder(i):
-    """Encode interger quantity `data`."""
-    assert is_numeric(i)
-    data = int_to_big_endian(i)
-    return '0x' + (encode_hex(data).lstrip('0') or '0')
+    return '0x' + encode_hex(data)
 
 
 def address_decoder(data):
@@ -193,12 +193,83 @@ def block_id_decoder(data):
     else:
         return quantity_decoder(data)
 
+
 def block_hash_decoder(data):
     """Decode a block hash."""
     decoded = data_decoder(data)
     if len(decoded) != 32:
         raise BadRequestError('Block hashes must be 32 bytes long')
     return decoded
+
+
+def tx_hash_decoder(data):
+    """Decode a transaction hash."""
+    decoded = data_decoder(data)
+    if len(decoded) != 32:
+        raise BadRequestError('Transaction hashes must be 32 bytes long')
+    return decoded
+
+
+def bool_decoder(data):
+    if not isinstance(data, bool):
+        raise BadRequestError('Paremter must be boolean')
+    return data
+
+
+def block_encoder(block, include_transactions):
+    """Encode a block as JSON object.
+
+    :param block: a :class:`ethereum.blocks.Block`
+    :param include_transactions: if true transactions are included, otherwise
+                                 only their hashes
+    :returns: a json encodable dictionary
+    """
+    d = {
+        'number': quantity_encoder(block.number),
+        'hash': data_encoder(block.hash),
+        'parentHash': data_encoder(block.prevhash),
+        'nonce': data_encoder(block.nonce),
+        'sha3Uncles': data_encoder(block.uncles_hash),
+        'logsBloom': data_encoder(int_to_big_endian(block.bloom)),
+        'transactionsRoot': data_encoder(block.tx_list_root),
+        'stateRoot': data_encoder(block.state_root),
+        'miner': data_encoder(block.coinbase),
+        'difficulty': quantity_encoder(block.difficulty),
+        'totalDifficulty': quantity_encoder(block.chain_difficulty()),
+        'extraData': data_encoder(block.extra_data),
+        'size': quantity_encoder(0),  # TODO
+        'gasLimit': quantity_encoder(block.gas_limit),
+        'minGasPrice': quantity_encoder(0), # TODO quantity_encoder(block.gas_price),
+        'gasUsed': quantity_encoder(block.gas_used),
+        'timestamp': quantity_encoder(block.timestamp),
+        'uncles': [data_encoder(u.header) for u in block.uncles]
+    }
+    if include_transactions:
+        d['transactions'] = [tx_encoder(tx) for tx in block.get_transactions()]
+    else:
+        d['transactions'] = [quantity_encoder(tx.hash) for x in block.get_transactions()]
+    return d
+
+
+def tx_encoder(transaction, block, i, pending):
+    """Encode a transaction as JSON object.
+
+    `transaction` is the `i`th transaction in `block`. `pending` specifies if
+    the block is pending or already mined.
+    """
+    return {
+        'hash': data_encoder(transaction.hash),
+        'nonce': quantity_encoder(transaction.nonce),
+        'blockHash': data_encoder(block.hash),
+        'blockNumber': quantity_encoder(block.number) if pending else None,
+        'transactionIndex': quantity_encoder(i),
+        'from': data_encoder(transaction.sender),
+        'to': data_encoder(transaction.to),
+        'value': quantity_encoder(transaction.value),
+        'gasPrice': quantity_encoder(transaction.gas_price),
+        'gas': quantity_encoder(transaction.gas_used),
+        'input': data_encoder(transaction.data),
+    }
 
 
 def decode_arg(name, decoder):
@@ -363,10 +434,10 @@ class Chain(Subdispatcher):
 
         :param block_id: either the block number as integer or 'pending',
                          'earliest' or 'latest'
-        :raises: `ValueError` if the block does not exist
+        :raises: `BadRequestError` if the block does not exist
         """
         if block_id == 'pending':
-            assert False  # TODO
+            assert False, "pending not implemented yet"  # TODO
         if block_id == 'latest':
             return self.chain.chain.head
         if block_id == 'earliest':
@@ -450,3 +521,49 @@ class Chain(Subdispatcher):
     def getCode(self, block_id):
         block = self.get_block(block_id)
         return block.get_code()
+
+    @public
+    @decode_arg('block_hash', block_hash_decoder)
+    @decode_arg('include_transactions', bool_decoder)
+    def getBlockByHash(self, block_hash, include_transactions):
+        block = self.get_block(block_hash)
+        return block_encoder(block, include_transactions)
+
+    @public
+    @decode_arg('block_id', block_id_decoder)
+    @decode_arg('include_transactions', bool_decoder)
+    def getBlockByNumber(self, block_id, include_transactions):
+        block = self.get_block(block_id)
+        return block_encoder(block, include_transactions)
+
+    @public
+    @decode_arg('tx_hash', tx_hash_decoder)
+    @encode_res(tx_encoder)
+    def getTransactionByHash(self, tx_hash):
+        try:
+            tx, _, _ = self.chain.chain.index.get_transaction(tx_hash)
+        except KeyError:
+            raise BadRequestError('Unknown transaction')
+        return tx
+
+    @public
+    @decode_arg('block_hash', block_hash_decoder)
+    @decode_arg('index', quantity_decoder)
+    @encode_res(tx_encoder)
+    def getTransactionByBlockHashAndIndex(self, block_hash, index):
+        block = self.get_block(block_hash)
+        try:
+            return block.get_transaction(index)
+        except IndexError:
+            raise BadRequestError('Unknown transaction')
+
+    @public
+    @decode_arg('block_id', block_id_decoder)
+    @decode_arg('index', quantity_decoder)
+    @encode_res(tx_encoder)
+    def getTransactionByBlockNumberAndIndex(self, block_id, index):
+        block = self.get_block(block_id)
+        try:
+            return block.get_transaction(index)
+        except IndexError:
+            raise BadRequestError('Unknown transaction')

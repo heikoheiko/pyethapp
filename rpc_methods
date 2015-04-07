@@ -21,11 +21,11 @@ Checklist for implemented JSON RPC methods
 [ ] eth_sendTransaction
 [ ] eth_call
 [ ] eth_flush
-[ ] eth_getBlockByHash
-[ ] eth_getBlockByNumber
-[ ] eth_getTransactionByHash
-[ ] eth_getTransactionByBlockHashAndIndex
-[ ] eth_getTransactionByBlockNumberAndIndex
+[x] eth_getBlockByHash
+[x] eth_getBlockByNumber
+[x] eth_getTransactionByHash
+[x] eth_getTransactionByBlockHashAndIndex
+[x] eth_getTransactionByBlockNumberAndIndex
 [ ] eth_getUncleByBlockHashAndIndex
 [ ] eth_getUncleByBlockNumberAndIndex
 [x] eth_getCompilers
