@@ -9,7 +9,7 @@ from tinyrpc.exc import BadRequestError, MethodNotFoundError
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol, JSONRPCInvalidParamsError
 from tinyrpc.server.gevent import RPCServerGreenlets
 from tinyrpc.transports.wsgi import WsgiServerTransport
-import ethereum.utils
+from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex
 import ethereum.slogging as slogging
 from devp2p.service import BaseService
 
@@ -131,9 +131,11 @@ class Subdispatcher(object):
 
 def quantity_decoder(data):
     """Decode `data` representing a quantity."""
-    if not data.startswith('0x'):
+    if not is_string(data):
+        success = False
+    elif not data.startswith('0x'):
         success = False  # must start with 0x prefix
-    elif data[3] == '0' and len(data) > 3:
+    elif len(data) > 3 and data[2] == '0':
         success = False  # must not have leading zeros (except `0x0`)
     else:
         data = data[2:]
@@ -141,12 +143,11 @@ def quantity_decoder(data):
         if len(data) % 2 == 1:
             data = '0' + data
         try:
-            # TODO: use py3 compatible version (e.g. rlp.utils.decode_hex)
-            return data.decode('hex')
+            return int(data, 16)
         except TypeError:
             success = False
     assert not success
-    raise BadRequestError('Quantity invalidly encoded')
+    raise BadRequestError('Invalid quantity encoding')
 
 
 def data_decoder(data):
@@ -162,7 +163,7 @@ def data_decoder(data):
         except TypeError:
             success = False
     assert not success
-    raise BadRequestError('Unformatted data invalidly encoded')
+    raise BadRequestError('Invalid data encoding')
 
 
 def data_encoder(data):
@@ -172,10 +173,9 @@ def data_encoder(data):
 
 def quantity_encoder(i):
     """Encode interger quantity `data`."""
-    if not ethereum.utils.is_numeric(data):
-        raise TypeError('Can only encode numbers as quantites')
-    data = ethereum.utils.int_to_big_endian(i)
-    return '0x' + data.encode('hex')
+    assert is_numeric(i)
+    data = int_to_big_endian(i)
+    return '0x' + (encode_hex(data).lstrip('0') or '0')
 
 
 def address_decoder(data):
@@ -192,6 +192,13 @@ def block_id_decoder(data):
         return data
     else:
         return quantity_decoder(data)
+
+def block_hash_decoder(data):
+    """Decode a block hash."""
+    decoded = data_decoder(data)
+    if len(decoded) != 32:
+        raise BadRequestError('Block hashes must be 32 bytes long')
+    return decoded
 
 
 def decode_arg(name, decoder):
@@ -364,11 +371,17 @@ class Chain(Subdispatcher):
             return self.chain.chain.head
         if block_id == 'earliest':
             return self.chain.chain.genesis
-        # by number
         try:
-            return self.chain.chain.index.get_block_by_number(block_id)
+            if is_numeric(block_id):
+                # by number
+                hash_ = self.chain.chain.index.get_block_by_number(block_id)
+            else:
+                # by hash
+                assert is_string(block_id)
+                hash_ = block_id
+            return self.chain.chain.get(hash_)
         except KeyError:
-            raise BadParameter('Unknown block')
+            raise BadRequestError('Unknown block')
 
     @public
     @encode_res(quantity_encoder)
@@ -377,8 +390,63 @@ class Chain(Subdispatcher):
 
     @public
     @decode_arg('address', address_decoder)
-    @decode_arg('block', block_id_decoder)
+    @decode_arg('block_id', block_id_decoder)
     @encode_res(quantity_encoder)
-    def getBalance(address, block):
-        block = self.get_block(block)
+    def getBalance(self, address, block_id):
+        block = self.get_block(block_id)
         return block.get_balance(address)
+
+    @public
+    @decode_arg('address', address_decoder)
+    @decode_arg('index', quantity_decoder)
+    @decode_arg('block_id', block_id_decoder)
+    @encode_res(data_encoder)
+    def getStorageAt(self, address, index, block_id):
+        block = self.get_block(block_id)
+        i = block.get_storage_data(address, index)
+        assert is_numeric(i)
+        return int_to_big_endian(i)
+
+    @public
+    @decode_arg('address', address_decoder)
+    @decode_arg('block_id', block_id_decoder)
+    @encode_res(quantity_encoder)
+    def getTransactionCount(self, address, block_id):
+        block = self.get_block(block_id)
+        return block.get_nonce(address)
+
+    @public
+    @decode_arg('block_hash', block_hash_decoder)
+    @encode_res(quantity_encoder)
+    def getBlockTransactionCountByHash(self, block_hash):
+        block = self.get_block(block_hash)
+        return block.transaction_count
+
+    @public
+    @decode_arg('block_id', block_id_decoder)
+    @encode_res(quantity_encoder)
+    def getBlockTransactionCountByNumber(self, block_id):
+        block = self.get_block(block_id)
+        return block.transaction_count
+
+    @public
+    @decode_arg('block_hash', block_hash_decoder)
+    @encode_res(quantity_encoder)
+    def getUncleCountByBlockHash(self, block_hash):
+        block = self.get_block(block_hash)
+        return len(block.uncles)
+
+    @public
+    @decode_arg('block_id', block_id_decoder)
+    @encode_res(quantity_encoder)
+    def getUncleCountByBlockNumber(self, block_id):
+        block = self.get_block(block_id)
+        return len(block.uncles)
+
+    @public
+    @decode_arg('address', address_decoder)
+    @decode_arg('block_id', block_id_decoder)
+    @encode_res(data_encoder)
+    def getCode(self, block_id):
+        block = self.get_block(block_id)
+        return block.get_code()
