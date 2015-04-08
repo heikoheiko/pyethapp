@@ -41,9 +41,10 @@ def get_config_path(data_dir=default_data_dir):
 default_config_path = get_config_path(default_data_dir)
 
 
-def setup_data_dir(data_dir):
-    if not os.path.exists(data_dir):
+def setup_data_dir(data_dir=None):
+    if data_dir and not os.path.exists(data_dir):
         os.makedirs(data_dir)
+        setup_required_config(data_dir)
 
 
 required_config = dict(p2p=dict(privkey_hex=''), eth=dict(privkey_hex=''))
@@ -60,10 +61,12 @@ def check_config(config, required_config=required_config):
     return True
 
 
-def setup_default_config(data_dir=default_data_dir):
+def setup_required_config(data_dir=default_data_dir):
     "writes minimal neccessary config to data_dir"
     def mk_privkey_hex():
-        return hex(random.getrandbits(256))[2:]
+        k = hex(random.getrandbits(256))[2:-1]
+        assert k.decode('hex')
+        return k
     log.info('setup default config', path=data_dir)
     config_path = get_config_path(data_dir)
     assert not os.path.exists(config_path)
@@ -76,8 +79,9 @@ def setup_default_config(data_dir=default_data_dir):
 def get_default_config(services):
     "collect default_config from services"
     config = dict()
+    assert isinstance(services, list)
     for s in services:
-        assert isinstance(s, (BaseService, BaseApp))
+        assert isinstance(s, (BaseService, BaseApp)) or issubclass(s, (BaseService, BaseApp))
         update_config_with_defaults(config, s.default_config)
     return config
 
@@ -86,6 +90,8 @@ def load_config(path=default_config_path):
     """Load config from string or file like object `path`."""
     log.info('loading config', path=path)
     if os.path.exists(path):
+        if os.path.isdir(path):
+            path = get_config_path(path)
         return yaml.load(open(path))
     return dict()
 
@@ -127,24 +133,8 @@ def set_config_param(config, s, strict=True):
     return config
 
 
-def load_contrib_services(config):  # FIXME
-    # load contrib services
-    contrib_directory = os.path.join(config_directory, 'contrib')  # change to pyethapp/contrib
-    contrib_modules = []
-    for directory in config['app']['contrib_dirs']:
-        sys.path.append(directory)
-        for filename in os.listdir(directory):
-            path = os.path.join(directory, filename)
-            if os.path.isfile(path) and filename.endswith('.py'):
-                contrib_modules.append(import_module(filename[:-3]))
-    contrib_services = []
-    for module in contrib_modules:
-        classes = inspect.getmembers(module, inspect.isclass)
-        for _, cls in classes:
-            if issubclass(cls, BaseService) and cls != BaseService:
-                contrib_services.append(cls)
-    log.info('Loaded contrib services', services=sorted(contrib_services.keys()))
-    return contrib_services
+def dump_config(config):
+    print yaml.dump(config)
 
 
 """
