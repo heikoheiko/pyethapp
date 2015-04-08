@@ -47,7 +47,7 @@ def setup_data_dir(data_dir=None):
         setup_required_config(data_dir)
 
 
-required_config = dict(p2p=dict(privkey_hex=''), eth=dict(privkey_hex=''))
+required_config = dict(node=dict(privkey_hex=''), eth=dict(privkey_hex=''))
 
 
 def check_config(config, required_config=required_config):
@@ -71,7 +71,7 @@ def setup_required_config(data_dir=default_data_dir):
     config_path = get_config_path(data_dir)
     assert not os.path.exists(config_path)
     setup_data_dir(data_dir)
-    config = dict(p2p=dict(privkey_hex=mk_privkey_hex()),
+    config = dict(node=dict(privkey_hex=mk_privkey_hex()),
                   eth=dict(privkey_hex=mk_privkey_hex()))
     write_config(config, config_path)
 

@@ -85,6 +85,10 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
+            if t_block.prevhash not in self.chain:
+                log.debug('unknown parent', block=t_block)
+                continue
+
             log.debug('Checking PoW', block=t_block)
             if not t_block.header.check_pow(_db):
                 log.debug('Invalid PoW', block=t_block)

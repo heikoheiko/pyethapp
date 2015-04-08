@@ -65,6 +65,7 @@ class JSONRPCServer(BaseService):
     """
 
     name = 'jsonrpc'
+    default_config = dict(jsonrpc=dict(listen_port=4000, listen_host='127.0.0.1'))
 
     def __init__(self, app):
         log.debug('initializing JSONRPCServer')
@@ -78,7 +79,7 @@ class JSONRPCServer(BaseService):
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
         # start wsgi server as a background-greenlet
-        self.port = app.config['jsonrpc']['port']
+        self.port = app.config['jsonrpc']['listen_port']
         self.wsgi_server = gevent.wsgi.WSGIServer(('127.0.0.1', self.port), transport.handle)
         self.rpc_server = RPCServerGreenlets(
             transport,
@@ -239,7 +240,7 @@ def block_encoder(block, include_transactions):
         'extraData': data_encoder(block.extra_data),
         'size': quantity_encoder(len(rlp.encode(block))),
         'gasLimit': quantity_encoder(block.gas_limit),
-        'minGasPrice': quantity_encoder(0), # TODO quantity_encoder(block.gas_price),
+        'minGasPrice': quantity_encoder(0),  # TODO quantity_encoder(block.gas_price),
         'gasUsed': quantity_encoder(block.gas_used),
         'timestamp': quantity_encoder(block.timestamp),
         'uncles': [data_encoder(u.header) for u in block.uncles]
