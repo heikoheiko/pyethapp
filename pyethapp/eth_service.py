@@ -184,7 +184,7 @@ class ChainService(WiredService):
 
         # send transactions
         log.debug("sending transactions", remote_id=proto)
-        transactions = self.get_transactions()
+        transactions = self.chain.get_transactions()
         proto.send_transactions(*transactions)
 
     # transactions
@@ -194,7 +194,7 @@ class ChainService(WiredService):
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
         for tx in transactions:
             # fixme bloomfilter
-            self.add_transaction(tx)
+            self.chain.add_transaction(tx)
 
     # blockhashes ###########
 
