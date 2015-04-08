@@ -2,7 +2,7 @@ from pyethapp.eth_protocol import ETHProtocol, TransientBlock
 from devp2p.service import WiredService
 from devp2p.protocol import BaseProtocol
 from devp2p.app import BaseApp
-from pyethereum import tester
+from ethereum import tester
 import rlp
 tester.disable_logging()
 

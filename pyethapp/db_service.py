@@ -1,5 +1,5 @@
 from devp2p.service import BaseService
-from pyethereum.slogging import get_logger
+from ethereum.slogging import get_logger
 log = get_logger('db')
 
 

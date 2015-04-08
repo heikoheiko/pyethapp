@@ -1,11 +1,11 @@
 import os
 from pyethapp import monkeypatches
-from pyethereum.db import EphemDB
+from ethereum.db import EphemDB
 from pyethapp import eth_service
 from pyethapp import leveldb_service
 from pyethapp import codernitydb_service
 from pyethapp import eth_protocol
-from pyethereum import slogging
+from ethereum import slogging
 import rlp
 import tempfile
 slogging.configure(config_string=':info')

@@ -2,11 +2,11 @@
 pyethapp
 ===============================
 
-.. image:: https://img.shields.io/travis/heikoheiko/pyethapp.svg
-        :target: https://travis-ci.org/heikoheiko/pyethapp
+.. image:: https://img.shields.io/travis/ethereum/pyethapp.svg
+        :target: https://travis-ci.org/ethereum/pyethapp
 
-.. image:: https://coveralls.io/repos/heikoheiko/pyethapp/badge.svg
-        :target: https://coveralls.io/r/heikoheiko/pyethapp
+.. image:: https://coveralls.io/repos/ethereum/pyethapp/badge.svg
+        :target: https://coveralls.io/r/ethereum/pyethapp
 
 
 .. image:: https://img.shields.io/pypi/v/pyethapp.svg
@@ -33,7 +33,7 @@ pyetapp leverages two ethereum core components to implement the client:
 
 .. _Ethereum: http://ethereum.org/
 .. _pyethereum: https://github.com/ethereum/pyethereum
-.. _pydevp2p: https://github.com/heikoheiko/pydevp2p
+.. _pydevp2p: https://github.com/ethereum/pydevp2p
 
 
 Status

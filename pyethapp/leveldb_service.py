@@ -2,7 +2,7 @@ import os
 from devp2p.service import BaseService
 from gevent.event import Event
 import leveldb
-from pyethereum import slogging
+from ethereum import slogging
 
 slogging.set_level('db', 'debug')
 log = slogging.get_logger('db')
@@ -15,12 +15,12 @@ class LevelDB(BaseService):
     """A service providing an interface to a level db."""
 
     name = 'db'
-    default_config = dict(db=dict(path=''), app=dict(dir=''))
+    default_config = dict(data_dir='')
 
     def __init__(self, app):
         super(LevelDB, self).__init__(app)
-        self.dbfile = os.path.join(self.app.config['app']['dir'],
-                                   self.app.config['db']['path'])
+        assert self.app.config['data_dir']
+        self.dbfile = os.path.join(self.app.config['data_dir'], 'leveldb')
         self.db = None
         self.uncommitted = dict()
         self.stop_event = Event()

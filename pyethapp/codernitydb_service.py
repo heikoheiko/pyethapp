@@ -5,8 +5,8 @@ from CodernityDB.database import Database, DatabasePathException,  \
 from CodernityDB.hash_index import HashIndex
 from devp2p.service import BaseService
 from gevent.event import Event
-from pyethereum import compress
-from pyethereum.slogging import get_logger
+from ethereum import compress
+from ethereum.slogging import get_logger
 
 
 log = get_logger('db')

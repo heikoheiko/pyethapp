@@ -1,15 +1,15 @@
 # https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
-from pyethereum.db import EphemDB
-from pyethereum.utils import privtoaddr, sha3
+from ethereum.db import EphemDB
+from ethereum.utils import privtoaddr, sha3
 import rlp
 from rlp.utils import encode_hex
-from pyethereum import blocks
-from pyethereum import processblock
-from pyethereum.miner import Miner
+from ethereum import blocks
+from ethereum import processblock
+from ethereum.miner import Miner
 from blockpool import Synchronizer
-from pyethereum.slogging import get_logger
-from pyethereum.chain import Chain
+from ethereum.slogging import get_logger
+from ethereum.chain import Chain
 from devp2p.service import WiredService
 import eth_protocol
 log = get_logger('eth.chainservice')
@@ -48,11 +48,10 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
-        self.new_miner()
         self.synchronizer = Synchronizer(self.chain)
 
     def _on_new_head(self, block):
-        self.new_miner()  # reset mining  FIXME
+        self.miner = Miner(self.chain.head_candidate)
         # if we are not syncing, forward all blocks
         if not self.synchronizer.synchronization_tasks:
             log.debug("broadcasting new head", block=block)
@@ -69,38 +68,12 @@ class ChainService(WiredService):
         else:
             time.sleep(.01)
 
-    def new_miner(self):
-        "new miner is initialized if HEAD is updated"
-        if not self.config:
-            return  # not configured yet
-
-        # prepare uncles
-        uncles = set(self.chain.get_uncles(self.chain.head))
-        blk = self.chain.head
-        for i in range(8):
-            for u in blk.uncles:  # assuming uncle headers
-                assert isinstance(u, blocks.BlockHeader)
-                u = u.hash
-                if u in self.chain:
-                    uncles.discard(self.chain.get(u))
-            if blk.has_parent():
-                blk = blk.get_parent()
-
-        coinbase = self.config['chain']['coinbase']
-        uncles = list(uncles)  # FIXME VERY MUCH !!!
-        miner = Miner(self.chain.head, uncles, coinbase)
-        if self.miner:
-            for tx in self.miner.get_transactions():
-                miner.add_transaction(tx)
-        self.miner = miner
-
     def mine(self):
         block = self.miner.mine()
         if block:
             # create new block
             if not self.chain.add_block(block):
                 log.debug("newly mined block is invalid!?", block_hash=block)
-                self.new_miner()
 
     def receive_chain(self, transient_blocks, proto=None):
         _db = EphemDB()
@@ -112,6 +85,10 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
+            if t_block.prevhash not in self.chain:
+                log.debug('unknown parent', block=t_block)
+                continue
+
             log.debug('Checking PoW', block=t_block)
             if not t_block.header.check_pow(_db):
                 log.debug('Invalid PoW', block=t_block)
@@ -172,19 +149,6 @@ class ChainService(WiredService):
                 else:
                     raise eth_protocol.ETHProtocolError('could not add block')
 
-    def add_transaction(self, transaction):
-        log.debug("add transaction", tx_hash=transaction)
-        res = self.miner.add_transaction(transaction)
-        if res:
-            log.debug("broadcasting valid", tx_hash=transaction)
-            # FIXME
-            #signals.send_local_transactions.send(sender=None, transactions=[transaction])
-        return res
-
-    def get_transactions(self):
-        log.debug("get_transactions called")
-        return self.miner.get_transactions()
-
     # wire protocol receivers ###########
 
     def on_wire_protocol_start(self, proto):
@@ -224,7 +188,7 @@ class ChainService(WiredService):
 
         # send transactions
         log.debug("sending transactions", remote_id=proto)
-        transactions = self.get_transactions()
+        transactions = self.chain.get_transactions()
         proto.send_transactions(*transactions)
 
     # transactions
@@ -234,7 +198,7 @@ class ChainService(WiredService):
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
         for tx in transactions:
             # fixme bloomfilter
-            self.add_transaction(tx)
+            self.chain.add_transaction(tx)
 
     # blockhashes ###########
 
