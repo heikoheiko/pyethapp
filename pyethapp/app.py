@@ -17,6 +17,7 @@ import config as konfig
 import utils
 from jsonrpc import JSONRPCServer
 from db_service import DBService
+from pyethapp import __version__
 
 slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
@@ -28,7 +29,12 @@ services += utils.load_contrib_services()
 
 class EthApp(BaseApp):
 
+    client_version = 'pyethapp/v%s/%s/%s/%s' % (__version__,
+                                                sys.platform,
+                                                'py%d.%d.%d' % sys.version_info[:3],
+                                                os.getlogin())  # FIXME: for development only
     default_config = dict(BaseApp.default_config)
+    default_config['client_version'] = client_version
 
 
 @click.command()
