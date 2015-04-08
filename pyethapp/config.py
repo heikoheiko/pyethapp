@@ -1,44 +1,115 @@
 """
-This module provides a "global" config dictionary and methods to load it from
-YAML files. At first import it tries to load the config from ``config.yaml``
-in the platform dependant application directory. If the file doesn't exist, it
-puts an example config there (not functional at the moment).
+Support for simple yaml persisted config dicts.
+
+Usual building of the configuration
+ - with datadir (default or from option)
+    - create dir if not available
+        - create minimal config if not available
+    - load config
+ - App is initialized with an (possibly empty) config
+    which is recursively updated (w/o overriding values) with its own default config
+ - Services are initialized with app and
+    recursively update (w/o overriding values) the config with their default config
+
+todo:
+    datadir
+
+
 """
-
+import random
 import os
+import sys
 import click
-from devp2p import crypto
+from devp2p.utils import update_config_with_defaults
 import yaml
+import ethereum.slogging as slogging
+from importlib import import_module
+import inspect
+from devp2p.service import BaseService
+from devp2p.app import BaseApp
 
 
-config = {}
+slogging.configure(config_string=':debug')
+log = slogging.get_logger('config')
+
+default_data_dir = click.get_app_dir('pyethapp')
 
 
-def load_config(f):
+def get_config_path(data_dir=default_data_dir):
+    return os.path.join(data_dir, 'config.yaml')
+
+default_config_path = get_config_path(default_data_dir)
+
+
+def setup_data_dir(data_dir):
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+
+required_config = dict(p2p=dict(privkey_hex=''), eth=dict(privkey_hex=''))
+
+
+def check_config(config, required_config=required_config):
+    "check if values are set"
+    for k, v in required_config.items():
+        if not config.get(k):
+            return False
+        if isinstance(v, dict):
+            if not check_config(config[k], v):
+                return False
+    return True
+
+
+def setup_default_config(data_dir=default_data_dir):
+    "writes minimal neccessary config to data_dir"
+    def mk_privkey_hex():
+        return hex(random.getrandbits(256))[2:]
+    log.info('setup default config', path=data_dir)
+    config_path = get_config_path(data_dir)
+    assert not os.path.exists(config_path)
+    setup_data_dir(data_dir)
+    config = dict(p2p=dict(privkey_hex=mk_privkey_hex()),
+                  eth=dict(privkey_hex=mk_privkey_hex()))
+    write_config(config, config_path)
+
+
+def get_default_config(services):
+    "collect default_config from services"
+    config = dict()
+    for s in services:
+        assert isinstance(s, (BaseService, BaseApp))
+        update_config_with_defaults(config, s.default_config)
+    return config
+
+
+def load_config(path=default_config_path):
+    """Load config from string or file like object `path`."""
+    log.info('loading config', path=path)
+    if os.path.exists(path):
+        return yaml.load(open(path))
+    return dict()
+
+
+def write_config(config, path=default_config_path):
     """Load config from string or file like object `f`, discarding the one
     already in place.
     """
-    config.clear()
-    update_config(f)
+    assert path
+    log.info('writing config', path=path)
+    with open(path, 'wb') as f:
+        yaml.dump(config, f)
 
 
-def update_config(f):
-    """Load another config and merge it with the existing one.
-
-    In case of key clashes (only the root level is considered), the original
-    values are replaced.
-    """
-    config.update(yaml.load(f))
-
-
-def set_config_param(s):
+def set_config_param(config, s, strict=True):
     """Set a specific config parameter.
 
     :param s: a string of the form ``a.b.c=d`` which will set the value of
               ``config['a']['b']['b']`` to ``yaml.load(d)``
+    :param strict: if `True` will only override existing values.
     :raises: :exc:`ValueError` if `s` is malformed or the value to set is not
              valid YAML
     """
+    # fixme add += support
     try:
         param, value = s.split('=', 1)
         keys = param.split('.')
@@ -46,80 +117,56 @@ def set_config_param(s):
         raise ValueError('Invalid config parameter')
     d = config
     for key in keys[:-1]:
+        if strict and key not in d:
+            raise KeyError('Unknown config option')
         d = d.setdefault(key, {})
     try:
         d[keys[-1]] = yaml.load(value)
     except yaml.parser.ParserError:
         raise ValueError('Invalid config value')
+    return config
 
 
-default_config = """
-app:
-    services:  # in order of registration (name of classes, not cls.name)
-        - db
-        #- discovery
-        - peermanager
-        - chain
-        - jsonrpc
-
-    # The modules in the following directories are loaded at startup.
-    # Instances of BaseService found in these modules are made available as
-    # service and can be registered via "app.services". If a service has the
-    # same name as a builtin service, the contributed one takes precedence.
-    contrib_dirs: []
-
-p2p:
-    num_peers: 10
-    bootstrap_nodes:
-        # local bootstrap
-         - enode://6ed2fecb28ff17dec8647f08aa4368b57790000e0e9b33a7b91f32c41b6ca9ba21600e9a8c44248ce63a71544388c6745fa291f88f8b81e109ba3da11f7b41b9@127.0.0.1:40000
-        # go_bootstrap
-        #- enode://6cdd090303f394a1cac34ecc9f7cda18127eafa2a3a06de39f6d920b0e583e062a7362097c7c65ee490a758b442acd5c80c6fce4b148c6a391e946b45131365b@54.169.166.226:30303
-        # cpp_bootstrap
-        #- enode://4a44599974518ea5b0f14c31c4463692ac0329cb84851f3435e6d1b18ee4eae4aa495f846a0fa1219bd58035671881d44423876e57db2abd57254d0197da0ebe@5.1.83.226:30303
-
-    listen_host: 0.0.0.0
-    listen_port: 30303
-    privkey_hex: 65462b0520ef7d3df61b9992ed3bea0c56ead753be7c8b3614e0ce01e4cac41b
-
-jsonrpc:
-    port: 8545
-
-db:
-    path: db  # either relative to application directory or absolute
-    implementation: LevelDB
+def load_contrib_services(config):  # FIXME
+    # load contrib services
+    contrib_directory = os.path.join(config_directory, 'contrib')  # change to pyethapp/contrib
+    contrib_modules = []
+    for directory in config['app']['contrib_dirs']:
+        sys.path.append(directory)
+        for filename in os.listdir(directory):
+            path = os.path.join(directory, filename)
+            if os.path.isfile(path) and filename.endswith('.py'):
+                contrib_modules.append(import_module(filename[:-3]))
+    contrib_services = []
+    for module in contrib_modules:
+        classes = inspect.getmembers(module, inspect.isclass)
+        for _, cls in classes:
+            if issubclass(cls, BaseService) and cls != BaseService:
+                contrib_services.append(cls)
+    log.info('Loaded contrib services', services=sorted(contrib_services.keys()))
+    return contrib_services
 
 
 """
-
-
-CONFIG_DIRECTORY = click.get_app_dir('pyethapp')
-CONFIG_FILENAME = os.path.join(CONFIG_DIRECTORY, 'config.yaml')
-CONTRIB_DIRECTORY = os.path.join(CONFIG_DIRECTORY, 'contrib')
-
-for _path in (CONFIG_DIRECTORY, CONTRIB_DIRECTORY):
-    if not os.path.exists(_path):
-        os.makedirs(_path)
-
-
-if os.path.exists(CONFIG_FILENAME):
-    with open(CONFIG_FILENAME) as f:
+if os.path.exists(config_path):
+    with open(config_path) as f:
         load_config(f)
 else:
     load_config(default_config)
     pubkey = crypto.privtopub(config['p2p']['privkey_hex'].decode('hex'))
-    config['app']['dir'] = CONFIG_DIRECTORY
+    config['app']['dir'] = config_directory
     config['p2p']['node_id'] = crypto.sha3(pubkey)
-    config['app']['contrib_dirs'].append(CONTRIB_DIRECTORY)
+    config['app']['contrib_dirs'].append(contrib_directory)
     # problem with the following code: default config specified here is
     # ignored if config file already exists -> annoying for development with
     # frequently changing default config. Also: comments are discarded
 #   try:
-#       os.makedirs(CONFIG_DIRECTORY)
+#       os.makedirs(config_directory)
 #   except OSError as exc:
 #       if exc.errno == errno.EEXIST:
 #           pass
 #       else:
 #           raise
-#   with open(CONFIG_FILENAME, 'wb') as f:
+#   with open(config_path, 'wb') as f:
 #       yaml.dump(config, f)
+"""
