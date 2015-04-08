@@ -43,9 +43,15 @@ class EthApp(BaseApp):
               help='Single configuration parameters (<param>=<value>)')
 @click.option('show_config', '--show-config', '-s', multiple=False, type=bool,
               help='Show the configuration')
-@click.option('data_dir', '--data-dir', '-d', multiple=False, type=bool,
+@click.option('data_dir', '--data-dir', '-d', multiple=False, type=str,
               help='data directory')
-def app(alt_config, config_values, show_config, data_dir):
+@click.option('log_config', '--log_config', '-l', multiple=False, type=str,
+              help='log_config string: e.g. ":info,eth:debug')
+def app(alt_config, config_values, show_config, data_dir, log_config):
+
+    # configure logging
+    log_config = log_config or ':info'
+    slogging.configure(log_config)
 
     # data dir default or from cli option
     data_dir = data_dir or konfig.default_data_dir
