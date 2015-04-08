@@ -1,16 +1,17 @@
 from decorator import decorator
 import inspect
+from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3
+import ethereum.slogging as slogging
 import gevent
 import gevent.wsgi
 import gevent.queue
+import rlp
 from tinyrpc.dispatch import RPCDispatcher
 from tinyrpc.dispatch import public as public_
 from tinyrpc.exc import BadRequestError, MethodNotFoundError
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol, JSONRPCInvalidParamsError
 from tinyrpc.server.gevent import RPCServerGreenlets
 from tinyrpc.transports.wsgi import WsgiServerTransport
-from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex
-import ethereum.slogging as slogging
 from devp2p.service import BaseService
 
 log = slogging.get_logger('jsonrpc')
@@ -144,7 +145,7 @@ def quantity_decoder(data):
             data = '0' + data
         try:
             return int(data, 16)
-        except TypeError:
+        except ValueError:
             success = False
     assert not success
     raise BadRequestError('Invalid quantity encoding')
@@ -165,8 +166,7 @@ def data_decoder(data):
         success = False  # must be even length
     else:
         try:
-            # TODO: use py3 compatible version (e.g. rlp.utils.decode_hex)
-            return data[2:].decode('hex')
+            return decode_hex(data[2:])
         except TypeError:
             success = False
     assert not success
@@ -237,7 +237,7 @@ def block_encoder(block, include_transactions):
         'difficulty': quantity_encoder(block.difficulty),
         'totalDifficulty': quantity_encoder(block.chain_difficulty()),
         'extraData': data_encoder(block.extra_data),
-        'size': quantity_encoder(0),  # TODO
+        'size': quantity_encoder(len(rlp.encode(block))),
         'gasLimit': quantity_encoder(block.gas_limit),
         'minGasPrice': quantity_encoder(0), # TODO quantity_encoder(block.gas_price),
         'gasUsed': quantity_encoder(block.gas_used),
@@ -303,7 +303,7 @@ class Web3(Subdispatcher):
     @decode_arg('data', data_decoder)
     @encode_res(data_encoder)
     def sha3(self, data):
-        return ethereum.utils.sha3(data)
+        return sha3(data)
 
     @public
     def clientVersion(self):
@@ -567,3 +567,25 @@ class Chain(Subdispatcher):
             return block.get_transaction(index)
         except IndexError:
             raise BadRequestError('Unknown transaction')
+
+    @public
+    @decode_arg('block_hash', block_hash_decoder)
+    @decode_arg('index', quantity_decoder)
+    def getUncleByBlockHashAndIndex(self, block_hash, index):
+        block = self.get_block(block_hash)
+        try:
+            uncle_hash = block.uncles[index]
+        except IndexError:
+            raise BadRequestError('Unknown uncle')
+        return block_encoder(self.get_block(uncle_hash))
+
+    @public
+    @decode_arg('block_number', quantity_decoder)
+    @decode_arg('index', quantity_decoder)
+    def getUncleByBlockNumberAndIndex(self, block_number, index):
+        block = self.get_block(block_number)
+        try:
+            uncle_hash = block.uncles[index]
+        except IndexError:
+            raise BadRequestError('Unknown uncle')
+        return block_encoder(self.get_block(uncle_hash))
