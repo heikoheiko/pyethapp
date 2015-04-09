@@ -11,6 +11,11 @@ import copy
 base_services = [DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer]
 
 
+def test_mk_privkey():
+    for i in range(512):
+        config.mk_privkey_hex()
+
+
 def test_default_config():
     conf = config.get_default_config([BaseApp] + base_services)
     assert 'p2p' in conf

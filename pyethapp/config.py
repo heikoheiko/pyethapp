@@ -61,12 +61,15 @@ def check_config(config, required_config=required_config):
     return True
 
 
+def mk_privkey_hex():
+    k = hex(random.getrandbits(256))[2:-1].zfill(64)
+    assert len(k) == 64
+    assert k.decode('hex')
+    return k
+
+
 def setup_required_config(data_dir=default_data_dir):
     "writes minimal neccessary config to data_dir"
-    def mk_privkey_hex():
-        k = hex(random.getrandbits(256))[2:-1]
-        assert k.decode('hex')
-        return k
     log.info('setup default config', path=data_dir)
     config_path = get_config_path(data_dir)
     assert not os.path.exists(config_path)

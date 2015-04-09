@@ -181,10 +181,13 @@ class ChainService(WiredService):
 
         log.debug('status received', proto=proto, eth_version=eth_version)
         assert eth_version == proto.version, (eth_version, proto.version)
-        assert network_id == proto.network_id, (network_id, proto.network_id)
+        if network_id != proto.network_id:
+            log.warn("invalid network id", remote_id=proto, network_id=network_id)
+            raise eth_protocol.ETHProtocolError('wrong network_id')
 
         # check genesis
         if genesis_hash != self.chain.genesis.hash:
+            log.warn("invalid genesis hash", remote_id=proto, genesis=genesis_hash.encode('hex'))
             raise eth_protocol.ETHProtocolError('wrong genesis block')
 
         # request chain
