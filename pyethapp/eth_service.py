@@ -21,8 +21,8 @@ processblock_apply_transaction = processblock.apply_transaction
 
 
 def _apply_transaction(block, tx):
-    log.debug('apply tx ctx switch')
-    gevent.sleep(0)
+    log.trace('apply tx ctx switch')
+    gevent.sleep(0.001)
     return processblock_apply_transaction(block, tx)
 processblock.apply_transaction = _apply_transaction
 
@@ -98,14 +98,15 @@ class ChainService(WiredService):
 
         for t_block in transient_blocks:  # oldest to newest
 
-            gevent.sleep(0)  # ctx switch
+            gevent.sleep(0.001)  # ctx switch
 
             if t_block.header.hash in self.chain:
                 log.debug('known', block=t_block)
                 continue
 
             if t_block.header.prevhash not in self.chain:
-                log.debug('unknown parent', block=t_block)
+                log.debug('unknown parent', block=t_block,
+                          parent=t_block.header.prevhash.encode('hex'))
                 continue
 
             log.debug('checking pow', block=t_block)
@@ -113,8 +114,7 @@ class ChainService(WiredService):
                 log.warn('invalid pow', block=t_block, proto=proto)
                 continue
 
-            log.debug('deserializing', block=t_block,
-                      parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
+            log.debug('deserializing', block=t_block, gas_used=t_block.header.gas_used)
             if t_block.header.prevhash == self.chain.head.hash:
                 log.trace('is child')
             if t_block.header.prevhash == self.chain.genesis.hash:
@@ -122,7 +122,11 @@ class ChainService(WiredService):
             try:
                 # block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
                 #                      db=self.chain.db)
+                st = time.time()
                 block = t_block.to_block(db=self.chain.db)
+                elapsed = time.time() - st
+                log.debug('deserialized', elapsed='%.2fs' % elapsed,
+                          gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
             except processblock.InvalidTransaction as e:
                 # FIXME there might be another exception in
                 # blocks.deserializeChild when replaying transactions
