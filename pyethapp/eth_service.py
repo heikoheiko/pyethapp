@@ -29,7 +29,7 @@ class ChainService(WiredService):
     """
     # required by BaseService
     name = 'chain'
-    default_config = dict(chain=dict(coinbase=privtoaddr(sha3('cow'))))
+    default_config = dict(eth=dict(privkey_hex=''))
 
     # required by WiredService
     wire_protocol = eth_protocol.ETHProtocol  # create for each peer
@@ -49,6 +49,7 @@ class ChainService(WiredService):
         log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
         self.synchronizer = Synchronizer(self.chain)
+        self.chain.coinbase = privtoaddr(self.config['eth']['privkey_hex'].decode('hex'))
 
     def _on_new_head(self, block):
         self.miner = Miner(self.chain.head_candidate)
@@ -89,11 +90,14 @@ class ChainService(WiredService):
                 log.debug('unknown parent', block=t_block)
                 continue
 
-            log.debug('Checking PoW', block=t_block)
+            st = time.time()
+            log.debug('checking pow', block=t_block)
             if not t_block.header.check_pow(_db):
-                log.debug('Invalid PoW', block=t_block)
+                log.debug('invalid pow', block=t_block)
                 continue
-            log.debug('Deserializing', block=t_block,
+            else:
+                log.debug('check pow', took='%.2fs' % (time.time() - st))
+            log.debug('deserializing', block=t_block,
                       parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
             if t_block.header.prevhash == self.chain.head.hash:
                 log.trace('is child')
@@ -176,8 +180,8 @@ class ChainService(WiredService):
                           genesis_hash):
 
         log.debug('status received', proto=proto, eth_version=eth_version)
-        assert eth_version == proto.version
-        assert network_id == proto.network_id
+        assert eth_version == proto.version, (eth_version, proto.version)
+        assert network_id == proto.network_id, (network_id, proto.network_id)
 
         # check genesis
         if genesis_hash != self.chain.genesis.hash:
