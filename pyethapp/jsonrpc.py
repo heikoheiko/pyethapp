@@ -74,7 +74,7 @@ class JSONRPCServer(BaseService):
 
         self.dispatcher = LoggingDispatcher()
         # register sub dispatchers
-        for subdispatcher in (Web3, Net, Compilers, DB, Chain):
+        for subdispatcher in (Web3, Net, Compilers, DB, Chain, Miner):
             subdispatcher.register(self)
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
@@ -185,6 +185,10 @@ def address_decoder(data):
     if len(addr) != 20:
         raise BadRequestError('Addresses must be 40 bytes long')
     return addr
+
+def address_encoder(address):
+    assert len(address) == 20
+    return encode_hex(address)
 
 
 def block_id_decoder(data):
@@ -387,6 +391,24 @@ class Compilers(Subdispatcher):
             return self.compilers['lll'](code)
         except KeyError:
             raise MethodNotFoundError()
+
+
+class Miner(Subdispatcher):
+
+    prefix = 'eth_'
+
+    @public
+    def mining(self):
+        return False
+
+    @public
+    @encode_res(address_encoder)
+    def coinbase(self):
+        return '\x00' * 20
+
+    @public
+    def gasPrice(self):
+        return 0
 
 
 class DB(Subdispatcher):
