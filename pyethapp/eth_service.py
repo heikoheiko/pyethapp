@@ -12,7 +12,19 @@ from ethereum.slogging import get_logger
 from ethereum.chain import Chain
 from devp2p.service import WiredService
 import eth_protocol
+import gevent
 log = get_logger('eth.chainservice')
+
+
+# patch to get context switches between tx replay
+processblock_apply_transaction = processblock.apply_transaction
+
+
+def _apply_transaction(block, tx):
+    log.trace('apply tx ctx switch')
+    gevent.sleep(0.001)
+    return processblock_apply_transaction(block, tx)
+processblock.apply_transaction = _apply_transaction
 
 
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
@@ -73,8 +85,7 @@ class ChainService(WiredService):
         block = self.miner.mine()
         if block:
             # create new block
-            if not self.chain.add_block(block):
-                log.debug("newly mined block is invalid!?", block_hash=block)
+            assert self.chain.add_block(block), ("newly mined block is invalid!?", block)
 
     def receive_chain(self, transient_blocks, proto=None):
         _db = EphemDB()
@@ -86,19 +97,24 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
-            if t_block.header.prevhash not in self.chain:
-                log.debug('unknown parent', block=t_block)
+
+            gevent.sleep(0.001)  # ctx switch
+
+            if t_block.header.hash in self.chain:
+                log.debug('known', block=t_block)
                 continue
 
-            st = time.time()
+            if t_block.header.prevhash not in self.chain:
+                log.debug('unknown parent', block=t_block,
+                          parent=t_block.header.prevhash.encode('hex'))
+                continue
+
             log.debug('checking pow', block=t_block)
             if not t_block.header.check_pow(_db):
-                log.debug('invalid pow', block=t_block)
+                log.warn('invalid pow', block=t_block, proto=proto)
                 continue
-            else:
-                log.debug('check pow', took='%.2fs' % (time.time() - st))
-            log.debug('deserializing', block=t_block,
-                      parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
+
+            log.debug('deserializing', block=t_block, gas_used=t_block.header.gas_used)
             if t_block.header.prevhash == self.chain.head.hash:
                 log.trace('is child')
             if t_block.header.prevhash == self.chain.genesis.hash:
@@ -106,19 +122,23 @@ class ChainService(WiredService):
             try:
                 # block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
                 #                      db=self.chain.db)
+                st = time.time()
                 block = t_block.to_block(db=self.chain.db)
+                elapsed = time.time() - st
+                log.debug('deserialized', elapsed='%.2fs' % elapsed,
+                          gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
             except processblock.InvalidTransaction as e:
                 # FIXME there might be another exception in
                 # blocks.deserializeChild when replaying transactions
                 # if this fails, we need to rewind state
-                log.debug('invalid transaction', block=t_block, error=e)
+                log.warn('invalid transaction', block=t_block, error=e, proto=proto)
                 # stop current syncing of this chain and skip the child blocks
                 self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
                 log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
-                    log.debug('wrong genesis', block=t_block)
+                    log.warn('wrong genesis', block=t_block, proto=proto)
                     if proto is not None:
                         proto.send_disconnect(reason='Wrong genesis block')
                     raise eth_protocol.ETHProtocolError('wrong genesis')
