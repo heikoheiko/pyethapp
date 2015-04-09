@@ -41,13 +41,22 @@ class EthApp(BaseApp):
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')
 @click.option('config_values', '-c', multiple=True, type=str,
               help='Single configuration parameters (<param>=<value>)')
-@click.option('show_config', '--show-config', '-s', multiple=False, type=bool,
-              help='Show the configuration')
 @click.option('data_dir', '--data-dir', '-d', multiple=False, type=str,
               help='data directory')
 @click.option('log_config', '--log_config', '-l', multiple=False, type=str,
               help='log_config string: e.g. ":info,eth:debug')
-def app(alt_config, config_values, show_config, data_dir, log_config):
+@click.argument('command', required=False)
+def app(command, alt_config, config_values, data_dir, log_config):
+    """
+    Welcome to ethapp version:{}
+
+    invocation:
+        ethapp [options] run        # starts the client
+
+    options:
+        ethapp [options] config     # shows the config
+
+    """.format(EthApp.client_version)
 
     # configure logging
     log_config = log_config or ':info'
@@ -66,7 +75,6 @@ def app(alt_config, config_values, show_config, data_dir, log_config):
         config = konfig.load_config(data_dir)
 
     config['data_dir'] = data_dir
-    konfig.dump_config(config)
 
     # add default config
     konfig.update_config_with_defaults(config, konfig.get_default_config([EthApp] + services))
@@ -80,9 +88,12 @@ def app(alt_config, config_values, show_config, data_dir, log_config):
             raise BadParameter('Config parameter must be of the form "a.b.c=d" where "a.b.c" '
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
-    if show_config:
+    if command == 'config':
         konfig.dump_config(config)
-    konfig.dump_config(config)
+        sys.exit(0)
+
+    if command != 'run':
+        sys.exit(0)
 
     # create app
     app = EthApp(config)
