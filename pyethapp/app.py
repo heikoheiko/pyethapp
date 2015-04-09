@@ -91,8 +91,12 @@ def app(command, alt_config, config_values, data_dir, log_config):
     if command == 'config':
         konfig.dump_config(config)
         sys.exit(0)
-
-    if command != 'run':
+    elif command == 'run':
+        pass
+    elif command == 'rundev':
+        # stop on every unhandled exception!
+        gevent.get_hub().SYSTEM_ERROR = BaseException
+    else:
         sys.exit(0)
 
     # create app
@@ -105,9 +109,6 @@ def app(command, alt_config, config_values, data_dir, log_config):
             assert service.name not in app.services
             service.register_with_app(app)
             assert hasattr(app.services, service.name)
-
-    # stop on every unhandled exception!
-    gevent.get_hub().SYSTEM_ERROR = BaseException  # (KeyboardInterrupt, SystemExit, SystemError)
 
     # start app
     app.start()
