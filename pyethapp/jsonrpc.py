@@ -1,6 +1,8 @@
 from decorator import decorator
 from collections import Iterable
 import inspect
+import pkg_resources
+from platform import python_implementation
 from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3
 import ethereum.slogging as slogging
 from ethereum.transactions import Transaction
@@ -20,7 +22,6 @@ from eth_protocol import ETHProtocol
 
 log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
-
 
 # hack to return the correct json rpc error code if the param count is wrong
 # (see https://github.com/mbr/tinyrpc/issues/19)
@@ -46,13 +47,23 @@ class LoggingDispatcher(RPCDispatcher):
         self.logger = log.debug
 
     def dispatch(self, request):
-        self.logger('RPC call', method=request.method, args=request.args,
-                    kwargs=request.kwargs, id=request.unique_id)
+        if isinstance(request, Iterable):
+            requests = request
+        else:
+            requests = [request]
+        for req in requests:
+            self.logger('RPC call', method=req.method, args=req.args, kwargs=req.kwargs,
+                        id=req.unique_id)
         res = super(LoggingDispatcher, self).dispatch(request)
-        try:
-            self.logger('RPC result', id=res.unique_id, result=res.result)
-        except AttributeError:
-            self.logger('RPC error', id=res.unique_id, error=res.error)
+        if isinstance(res, Iterable):
+            ress = res
+        else:
+            ress = [res]
+        for res in ress:
+            try:
+                self.logger('RPC result', id=res.unique_id, result=res.result)
+            except AttributeError:
+                self.logger('RPC error', id=res.unique_id, error=res.error)
         return res
 
 
@@ -251,7 +262,7 @@ def block_encoder(block, include_transactions, pending=False):
         'minGasPrice': quantity_encoder(0),  # TODO quantity_encoder(block.gas_price),
         'gasUsed': quantity_encoder(block.gas_used),
         'timestamp': quantity_encoder(block.timestamp),
-        'uncles': [data_encoder(u.header) for u in block.uncles]
+        'uncles': [data_encoder(u.hash) for u in block.uncles]
     }
     if include_transactions:
         d['transactions'] = []
@@ -277,8 +288,8 @@ def tx_encoder(transaction, block, i, pending):
         'from': data_encoder(transaction.sender),
         'to': data_encoder(transaction.to),
         'value': quantity_encoder(transaction.value),
-        'gasPrice': quantity_encoder(transaction.gas_price),
-        'gas': quantity_encoder(transaction.gas_used),
+        'gasPrice': quantity_encoder(transaction.gasprice),
+        'gas': quantity_encoder(transaction.startgas),
         'input': data_encoder(transaction.data),
     }
 
@@ -340,7 +351,8 @@ class Web3(Subdispatcher):
 
     @public
     def clientVersion(self):
-        raise MethodNotFoundError()
+        version = pkg_resources.require('pyethapp')[0].version
+        return 'pyethapp/v{}/{}'.format(version, python_implementation())
 
 
 class Net(Subdispatcher):
@@ -351,7 +363,6 @@ class Net(Subdispatcher):
     required_services = ['peermanager']
 
     @public
-    @encode_res(quantity_encoder)
     def version(self):
         return ETHProtocol.version
 
@@ -508,7 +519,6 @@ class Chain(Subdispatcher):
     prefix = 'eth_'
     required_services = ['chain']
 
-
     @public
     @encode_res(quantity_encoder)
     def blockNumber(self):
@@ -593,35 +603,34 @@ class Chain(Subdispatcher):
 
     @public
     @decode_arg('tx_hash', tx_hash_decoder)
-    @encode_res(tx_encoder)
     def getTransactionByHash(self, tx_hash):
         try:
-            tx, _, _ = self.chain.chain.index.get_transaction(tx_hash)
+            tx, block, index = self.chain.chain.index.get_transaction(tx_hash)
         except KeyError:
             raise BadRequestError('Unknown transaction')
-        return tx
+        return tx_encoder(tx, block, index, False)
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('index', quantity_decoder)
-    @encode_res(tx_encoder)
     def getTransactionByBlockHashAndIndex(self, block_hash, index):
         block = get_block(self.chain.chain, block_hash)
         try:
-            return block.get_transaction(index)
+            tx = block.get_transaction(index)
         except IndexError:
             raise BadRequestError('Unknown transaction')
+        return tx_encoder(tx, block, index, False)
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('index', quantity_decoder)
-    @encode_res(tx_encoder)
     def getTransactionByBlockNumberAndIndex(self, block_id, index):
         block = get_block(self.chain.chain, block_id)
         try:
-            return block.get_transaction(index)
+            tx = block.get_transaction(index)
         except IndexError:
             raise BadRequestError('Unknown transaction')
+        return tx_encoder(tx, block, index, block_id == 'pending')
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
@@ -656,25 +665,35 @@ class Chain(Subdispatcher):
         for tx in block.transactions:
             success, output = processblock.apply_transaction(test_block, tx)
             assert success
+
         # validate transaction
         if not isinstance(data, dict):
             raise BadRequestError('Transaction must be an object')
-        expected_attributes = ['from', 'to', 'gas', 'gasPrice', 'value', 'data']
-        for key in expected_attributes:
-            if key not in data:
-                raise BadRequestError('Transaction object must have attribute {}'.format(key))
-        if len(data) > len(expected_attributes):
-            raise BadRequestError('Transaction object has too many attributes')
-        sender = address_decoder(data['from'])
         to = address_decoder(data['to'])
-        startgas = quantity_decoder(data['gas'])
-        gasprice = quantity_decoder(data['gasPrice'])
-        value = quantity_decoder(data['value'])
-        data = data_decoder(data['data'])
+        try:
+            startgas = quantity_decoder(data['gas'])
+        except KeyError:
+            startgas = block.gas_limit - block.gas_used
+        try:
+            gasprice = quantity_decoder(data['gasPrice'])
+        except KeyError:
+            gasprice = 0
+        try:
+            value = quantity_decoder(data['value'])
+        except KeyError:
+            value = 0
+        try:
+            data_ = data_decoder(data['data'])
+        except KeyError:
+            data_ = b''
+        try:
+            sender = address_decoder(data['from'])
+        except KeyError:
+            sender = '\x00' * 20
         # initialize transaction
         nonce = block.get_nonce(sender)
-        tx = Transaction(nonce, gasprice, startgas, to, value, data)
-        tx.sender = sender  # tx will have correct sender, but invalid signature
+        tx = Transaction(nonce, gasprice, startgas, to, value, data_)
+        tx.sender = sender
         # apply transaction
         try:
             success, output = processblock.apply_transaction(test_block, tx)
