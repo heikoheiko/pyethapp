@@ -17,14 +17,14 @@ log = get_logger('eth.chainservice')
 
 
 # patch to get context switches between tx replay
-processblock_apply_transaction = processblock.apply_transaction
+processblock_apply_msg = processblock._apply_msg
 
 
-def _apply_transaction(block, tx):
-    log.trace('apply tx ctx switch')
+def _apply_msg(ext, msg, code):
+    log.debug('apply_msg ctx switch')
     gevent.sleep(0.001)
-    return processblock_apply_transaction(block, tx)
-processblock.apply_transaction = _apply_transaction
+    return processblock_apply_msg(ext, msg, code)
+processblock._apply_msg = _apply_msg
 
 
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
