@@ -22,7 +22,7 @@ processblock_apply_msg = processblock._apply_msg
 
 def _apply_msg(ext, msg, code):
     log.debug('apply_msg ctx switch')
-    gevent.sleep(0.001)
+    gevent.sleep(0)
     return processblock_apply_msg(ext, msg, code)
 processblock._apply_msg = _apply_msg
 
