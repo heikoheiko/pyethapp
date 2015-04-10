@@ -2,6 +2,8 @@ from decorator import decorator
 import inspect
 from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3
 import ethereum.slogging as slogging
+from ethereum.transactions import Transaction
+from ethereum import processblock
 import gevent
 import gevent.wsgi
 import gevent.queue
@@ -183,7 +185,7 @@ def address_decoder(data):
     """Decode an address from hex with 0x prefix to 20 bytes."""
     addr = data_decoder(data)
     if len(addr) != 20:
-        raise BadRequestError('Addresses must be 40 bytes long')
+        raise BadRequestError('Addresses must be 20 bytes long')
     return addr
 
 def address_encoder(address):
@@ -275,6 +277,13 @@ def tx_encoder(transaction, block, i, pending):
         'gas': quantity_encoder(transaction.gas_used),
         'input': data_encoder(transaction.data),
     }
+
+
+def loglist_encoder(log_list):
+    l = []
+    assert False
+    for log, block in log_list:
+        assert False
 
 
 def decode_arg(name, decoder):
@@ -460,7 +469,7 @@ class Chain(Subdispatcher):
         :raises: `BadRequestError` if the block does not exist
         """
         if block_id == 'pending':
-            assert False, "pending not implemented yet"  # TODO
+            return self.chain.chain.head_candidate
         if block_id == 'latest':
             return self.chain.chain.head
         if block_id == 'earliest':
@@ -612,3 +621,44 @@ class Chain(Subdispatcher):
         except IndexError:
             raise BadRequestError('Unknown uncle')
         return block_encoder(self.get_block(uncle_hash))
+
+    @public
+    @decode_arg('block_id', block_id_decoder)
+    def call(self, data, block_id):
+        block = self.get_block(block_id)
+        # rebuild block state before finalization
+        parent = block.get_parent()
+        test_block = block.init_from_parent(parent, block.coinbase,
+                                            timestamp=block.timestamp)
+        for tx in block.transactions:
+            success, output = processblock.apply_transaction(test_block, tx)
+            assert success
+        # validate transaction
+        if not isinstance(data, dict):
+            raise BadRequestError('Transaction must be an object')
+        expected_attributes = ['from', 'to', 'gas', 'gasPrice', 'value', 'data']
+        for key in expected_attributes:
+            if key not in data:
+                raise BadRequestError('Transaction object must have attribute {}'.format(key))
+        if len(data) > len(expected_attributes):
+            raise BadRequestError('Transaction object has too many attributes')
+        sender = address_decoder(data['from'])
+        to = address_decoder(data['to'])
+        startgas = quantity_decoder(data['gas'])
+        gasprice = quantity_decoder(data['gasPrice'])
+        value = quantity_decoder(data['value'])
+        data = data_decoder(data['data'])
+        # initialize transaction
+        nonce = block.get_nonce(sender)
+        tx = Transaction(nonce, gasprice, startgas, to, value, data)
+        tx.sender = sender  # tx will have correct sender, but invalid signature
+        # apply transaction
+        import ipdb; ipdb.set_trace()
+        try:
+            success, output = processblock.apply_transaction(test_block, tx)
+        except processblock.InvalidTransaction:
+            success = False
+        if success:
+            return output
+        else:
+            return False
