@@ -1,8 +1,6 @@
 from decorator import decorator
 from collections import Iterable
 import inspect
-import pkg_resources
-from platform import python_implementation
 from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3
 import ethereum.slogging as slogging
 from ethereum.transactions import Transaction
@@ -131,6 +129,9 @@ class Subdispatcher(object):
     def register(cls, json_rpc_service):
         """Register a new instance at ``json_rpc_service.dispatcher``.
 
+        The subdispatcher will be able to access all required services as well
+        as the app object as attributes.
+
         If one of the required services is not available, log this as warning
         but don't fail.
         """
@@ -143,6 +144,7 @@ class Subdispatcher(object):
                             'available'.format(service_name))
                 return
             setattr(dispatcher, service_name, service)
+        setattr(dispatcher, 'app', json_rpc_service.app)
         json_rpc_service.dispatcher.register_instance(dispatcher, cls.prefix)
 
 
@@ -351,8 +353,7 @@ class Web3(Subdispatcher):
 
     @public
     def clientVersion(self):
-        version = pkg_resources.require('pyethapp')[0].version
-        return 'pyethapp/v{}/{}'.format(version, python_implementation())
+        return self.app.client_version
 
 
 class Net(Subdispatcher):
