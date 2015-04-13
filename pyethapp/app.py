@@ -1,4 +1,3 @@
-
 import monkeypatches
 import sys
 import os
@@ -37,7 +36,7 @@ class EthApp(BaseApp):
     default_config['client_version'] = client_version
 
 
-@click.command()
+@click.group(help='Welcome to ethapp version:{}'.format(EthApp.client_version))
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')
 @click.option('config_values', '-c', multiple=True, type=str,
               help='Single configuration parameters (<param>=<value>)')
@@ -45,18 +44,8 @@ class EthApp(BaseApp):
               help='data directory')
 @click.option('log_config', '--log_config', '-l', multiple=False, type=str,
               help='log_config string: e.g. ":info,eth:debug')
-@click.argument('command', required=False)
-def app(command, alt_config, config_values, data_dir, log_config):
-    """
-    Welcome to ethapp version:{}
-
-    invocation:
-        ethapp [options] run        # starts the client
-
-    options:
-        ethapp [options] config     # shows the config
-
-    """.format(EthApp.client_version)
+@click.pass_context
+def app(ctx, alt_config, config_values, data_dir, log_config):
 
     # configure logging
     log_config = log_config or ':info'
@@ -88,19 +77,19 @@ def app(command, alt_config, config_values, data_dir, log_config):
             raise BadParameter('Config parameter must be of the form "a.b.c=d" where "a.b.c" '
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
-    if command == 'config':
-        konfig.dump_config(config)
-        sys.exit(0)
-    elif command == 'run':
-        pass
-    elif command == 'rundev':
-        # stop on every unhandled exception!
-        gevent.get_hub().SYSTEM_ERROR = BaseException
-    else:
-        sys.exit(0)
+    ctx.obj = {'config': config}
 
+
+@app.command()
+@click.option('--dev/--nodev', default=False, help='Exit at unhandled exceptions')
+@click.pass_context
+def run(ctx, dev):
+    """Start the client"""
     # create app
-    app = EthApp(config)
+    app = EthApp(ctx.obj['config'])
+
+    if dev:
+        gevent.get_hub().SYSTEM_ERROR = BaseException
 
     # register services
     for service in services:
@@ -122,6 +111,13 @@ def app(command, alt_config, config_values, data_dir, log_config):
 
     # finally stop
     app.stop()
+
+@app.command()
+@click.pass_context
+def config(ctx):
+    """Show the config"""
+    konfig.dump_config(ctx.obj['config'])
+
 
 if __name__ == '__main__':
     #  python app.py 2>&1 | less +F
