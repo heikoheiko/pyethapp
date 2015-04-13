@@ -448,6 +448,7 @@ class Miner(Subdispatcher):
         return '\x00' * 20
 
     @public
+    @encode_res(quantity_encoder)
     def gasPrice(self):
         return 0
 
