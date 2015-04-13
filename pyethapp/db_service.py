@@ -20,6 +20,10 @@ else:
     dbs['CodernityDB'] = CodernityDB
 
 
+from ephemdb_service import EphemDB
+dbs['EphemDB'] = EphemDB
+
+
 class DBService(BaseService):
 
     name = 'db'
