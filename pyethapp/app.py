@@ -1,4 +1,5 @@
 import monkeypatches
+import json
 import sys
 import os
 import signal
@@ -11,12 +12,14 @@ from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 from devp2p.app import BaseApp
 from eth_service import ChainService
+import ethereum
+from ethereum.blocks import Block
 import ethereum.slogging as slogging
 import config as konfig
-import utils
-from jsonrpc import JSONRPCServer
 from db_service import DBService
+from jsonrpc import JSONRPCServer
 from pyethapp import __version__
+import utils
 
 slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
@@ -112,11 +115,74 @@ def run(ctx, dev):
     # finally stop
     app.stop()
 
+
 @app.command()
 @click.pass_context
 def config(ctx):
     """Show the config"""
     konfig.dump_config(ctx.obj['config'])
+
+
+@app.command()
+@click.argument('file', type=click.File(), required=True)
+@click.pass_context
+def blocktest(ctx, file):
+    """Start after importing blocks from a file.
+
+    It is recommended to turn the peermanager off when running block tests. If
+    not the local test chain will be quickly replaced by the real one.
+    """
+    app = EthApp(ctx.obj['config'])
+    app.config['db']['implementation'] = 'EphemDB'
+    app.config['deactivated_services'] += 'peermanager'
+
+    # register services
+    for service in services:
+        assert issubclass(service, BaseService)
+        if service.name not in app.config['deactivated_services']:
+            assert service.name not in app.services
+            service.register_with_app(app)
+            assert hasattr(app.services, service.name)
+
+    if ChainService.name not in app.services:
+        log.fatal('No chainmanager registered')
+        ctx.abort()
+    if DBService.name not in app.services:
+        log.fatal('No db registered')
+        ctx.abort()
+
+    log.info('loading block file', path=file.name)
+    try:
+        data = json.load(file)
+    except ValueError:
+        log.fatal('Invalid JSON file')
+    if len(data) != 1:
+        log.fatal('Invalid file (not exactly one top level element)')
+        ctx.abort()
+    try:
+        blocks = utils.load_block_tests(data.values()[0], app.services.chain.chain.db)
+    except ValueError:
+        log.fatal('Invalid blocks encountered')
+        ctx.abort()
+
+    # start app
+    app.start()
+
+    log.info('building blockchain')
+    Block.is_genesis = lambda self: self.number == 0
+    app.services.chain.chain._initialize_blockchain(genesis=blocks[0])
+    for block in blocks[1:]:
+        app.services.chain.chain.add_block(block)
+
+    # wait for interupt
+    evt = Event()
+    gevent.signal(signal.SIGQUIT, evt.set)
+    gevent.signal(signal.SIGTERM, evt.set)
+    gevent.signal(signal.SIGINT, evt.set)
+    evt.wait()
+
+    # finally stop
+    app.stop()
 
 
 if __name__ == '__main__':
