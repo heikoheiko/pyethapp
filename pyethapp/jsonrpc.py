@@ -222,9 +222,11 @@ def data_decoder(data):
     """Decode `data` representing unformatted data."""
     if not data.startswith('0x'):
         success = False  # must start with 0x prefix
-    elif len(data) % 2 != 0:
-        success = False  # must be even length
+#    elif len(data) % 2 != 0:
+#        success = False  # must be even length
     else:
+        if len(data) % 2 != 0:  # TODO: remove
+            data += '0'         # TODO: remove
         try:
             return decode_hex(data[2:])
         except TypeError:
@@ -799,20 +801,22 @@ class FilterManager(Subdispatcher):
     def newFilter(self, filter_dict):
         if not isinstance(filter_dict, dict):
             raise BadRequestError('Filter must be an object')
-        expected_keys = set(['fromBlock', 'toBlock', 'address', 'topics'])
-        if set(filter_dict.keys()) != expected_keys:
+        required_keys = set(['fromBlock', 'toBlock'])
+        if not required_keys.issubset(set(filter_dict.keys())):
             raise BadRequestError('Invalid filter object')
 
         b0 = self.json_rpc_server.get_block(filter_dict['fromBlock'])
         b1 = self.json_rpc_server.get_block(filter_dict['toBlock'])
-        address = filter_dict['address']
+        address = filter_dict.get('address', None)
         if is_string(address):
             addresses = [address_decoder(address)]
         elif isinstance(address, Iterable):
             addresses = [address_decoder(addr) for addr in address]
+        elif address is None:
+            addresses = None
         else:
             raise JSONRPCInvalidParamsError('Parameter must be address or list of addresses')
-        validated_topics = [data_decoder(topic) for topic in topics]
+        topics = [data_decoder(topic) for topic in filter_dict.get('topics', [])]
 
         blocks = [b0]
         while blocks[-1] != b1:
