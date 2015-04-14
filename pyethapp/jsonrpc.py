@@ -92,16 +92,19 @@ class JSONRPCServer(BaseService):
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
         # start wsgi server as a background-greenlet
-        self.port = app.config['jsonrpc']['listen_port']
-        self.wsgi_server = gevent.wsgi.WSGIServer(('127.0.0.1', self.port), transport.handle)
+        self.listen_port = app.config['jsonrpc']['listen_port']
+        self.listen_host = app.config['jsonrpc']['listen_host']
+        self.wsgi_server = gevent.wsgi.WSGIServer((self.listen_host, self.listen_port),
+                                                  transport.handle)
         self.rpc_server = RPCServerGreenlets(
             transport,
             JSONRPCProtocol(),
             self.dispatcher
         )
+        self.default_block = 'latest'
 
     def _run(self):
-        log.info('starting JSONRPCServer', port=self.port)
+        log.info('starting JSONRPCServer', port=self.listen_port)
         # in the main greenlet, run our rpc_server
         self.wsgi_thread = gevent.spawn(self.wsgi_server.serve_forever)
         self.rpc_server.serve_forever()
@@ -109,6 +112,44 @@ class JSONRPCServer(BaseService):
     def stop(self):
         log.info('stopping JSONRPCServer')
         self.wsgi_thread.kill()
+
+    def get_block(self, chain, block_id=None):
+        """Return the block identified by `block_id`.
+
+        This method also sets :attr:`default_block` to the value of `block_id`
+        which will be returned if, at later calls, `block_id` is not provided.
+
+        Subdispatchers using this function have to ensure sure that a
+        chainmanager is registered via :attr:`required_services`.
+
+        :param block_id: either the block number as integer or 'pending',
+                        'earliest' or 'latest', or `None` for the default
+                        block
+        :raises: `BadRequestError` if the block does not exist
+        """
+        assert 'chain' in self.app.services
+        chain = self.app.services.chain.chain
+        if block_id is None:
+            block_id = self.default_block
+        else:
+            self.default_block = block_id
+        if block_id == 'pending':
+            return self.app.services.chain.chain.head_candidate
+        if block_id == 'latest':
+            return chain.head
+        if block_id == 'earliest':
+            return chain.genesis
+        try:
+            if is_numeric(block_id):
+                # by number
+                hash_ = chain.index.get_block_by_number(block_id)
+            else:
+                # by hash
+                assert is_string(block_id)
+                hash_ = block_id
+            return chain.get(hash_)
+        except KeyError:
+            raise BadRequestError('Unknown block')
 
 
 class Subdispatcher(object):
@@ -144,7 +185,8 @@ class Subdispatcher(object):
                             'available'.format(service_name))
                 return
             setattr(dispatcher, service_name, service)
-        setattr(dispatcher, 'app', json_rpc_service.app)
+        dispatcher.app = json_rpc_service.app
+        dispatcher.json_rpc_server = json_rpc_service
         json_rpc_service.dispatcher.register_instance(dispatcher, cls.prefix)
 
 
@@ -198,10 +240,13 @@ def data_encoder(data):
 
 def address_decoder(data):
     """Decode an address from hex with 0x prefix to 20 bytes."""
+    if not data.startswith('0x'):
+        data = '0x' + data
     addr = data_decoder(data)
     if len(addr) != 20:
         raise BadRequestError('Addresses must be 20 bytes long')
     return addr
+
 
 def address_encoder(address):
     assert len(address) == 20
@@ -209,8 +254,8 @@ def address_encoder(address):
 
 
 def block_id_decoder(data):
-    """Decode a block identifier (either an integer or 'latest', 'earliest' or 'pending')."""
-    if data in ('latest', 'earliest', 'pending'):
+    """Decode a block identifier as expected from :meth:`JSONRPCServer.get_block`."""
+    if data in (None, 'latest', 'earliest', 'pending'):
         return data
     else:
         return quantity_decoder(data)
@@ -487,33 +532,6 @@ class DB(Subdispatcher):
             return ''
 
 
-def get_block(chain, block_id):
-    """Return the block identified by `block_id`.
-
-    :param chain: the :class:`ethereum.chain.chain` in which the block is
-    :param block_id: either the block number as integer or 'pending',
-                     'earliest' or 'latest'
-    :raises: `BadRequestError` if the block does not exist
-    """
-    if block_id == 'pending':
-        return chain.head_candidate
-    if block_id == 'latest':
-        return chain.head
-    if block_id == 'earliest':
-        return chain.genesis
-    try:
-        if is_numeric(block_id):
-            # by number
-            hash_ = chain.index.get_block_by_number(block_id)
-        else:
-            # by hash
-            assert is_string(block_id)
-            hash_ = block_id
-        return chain.get(hash_)
-    except KeyError:
-        raise BadRequestError('Unknown block')
-
-
 class Chain(Subdispatcher):
 
     """Subdispatcher for methods to query the block chain."""
@@ -530,8 +548,8 @@ class Chain(Subdispatcher):
     @decode_arg('address', address_decoder)
     @decode_arg('block_id', block_id_decoder)
     @encode_res(quantity_encoder)
-    def getBalance(self, address, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getBalance(self, address, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         return block.get_balance(address)
 
     @public
@@ -539,8 +557,8 @@ class Chain(Subdispatcher):
     @decode_arg('index', quantity_decoder)
     @decode_arg('block_id', block_id_decoder)
     @encode_res(data_encoder)
-    def getStorageAt(self, address, index, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getStorageAt(self, address, index, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         i = block.get_storage_data(address, index)
         assert is_numeric(i)
         return int_to_big_endian(i)
@@ -549,58 +567,58 @@ class Chain(Subdispatcher):
     @decode_arg('address', address_decoder)
     @decode_arg('block_id', block_id_decoder)
     @encode_res(quantity_encoder)
-    def getTransactionCount(self, address, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getTransactionCount(self, address, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         return block.get_nonce(address)
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
     @encode_res(quantity_encoder)
     def getBlockTransactionCountByHash(self, block_hash):
-        block = get_block(self.chain.chain, block_hash)
+        block = self.json_rpc_server.get_block(block_hash)
         return block.transaction_count
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @encode_res(quantity_encoder)
-    def getBlockTransactionCountByNumber(self, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getBlockTransactionCountByNumber(self, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         return block.transaction_count
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
     @encode_res(quantity_encoder)
     def getUncleCountByBlockHash(self, block_hash):
-        block = get_block(self.chain.chain, block_hash)
+        block = self.json_rpc_server.get_block(block_hash)
         return len(block.uncles)
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @encode_res(quantity_encoder)
-    def getUncleCountByBlockNumber(self, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getUncleCountByBlockNumber(self, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         return len(block.uncles)
 
     @public
     @decode_arg('address', address_decoder)
     @decode_arg('block_id', block_id_decoder)
     @encode_res(data_encoder)
-    def getCode(self, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def getCode(self, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         return block.get_code()
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByHash(self, block_hash, include_transactions):
-        block = get_block(self.chain.chain, block_hash)
+        block = self.json_rpc_server.get_block(block_hash)
         return block_encoder(block, include_transactions)
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByNumber(self, block_id, include_transactions):
-        block = get_block(self.chain.chain, block_id)
+        block = self.json_rpc_server.get_block(block_id=None)
         return block_encoder(block, include_transactions)
 
     @public
@@ -616,7 +634,7 @@ class Chain(Subdispatcher):
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('index', quantity_decoder)
     def getTransactionByBlockHashAndIndex(self, block_hash, index):
-        block = get_block(self.chain.chain, block_hash)
+        block = self.json_rpc_server.get_block(block_hash)
         try:
             tx = block.get_transaction(index)
         except IndexError:
@@ -627,7 +645,7 @@ class Chain(Subdispatcher):
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('index', quantity_decoder)
     def getTransactionByBlockNumberAndIndex(self, block_id, index):
-        block = get_block(self.chain.chain, block_id)
+        block = self.json_rpc_server.get_block(block_id)
         try:
             tx = block.get_transaction(index)
         except IndexError:
@@ -638,28 +656,28 @@ class Chain(Subdispatcher):
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('index', quantity_decoder)
     def getUncleByBlockHashAndIndex(self, block_hash, index):
-        block = get_block(self.chain.chain, block_hash)
+        block = self.json_rpc_server.get_block(block_hash)
         try:
             uncle_hash = block.uncles[index]
         except IndexError:
             raise BadRequestError('Unknown uncle')
-        return block_encoder(get_block(self.chain.chain, uncle_hash))
+        return block_encoder(self.json_rpc_server.get_block(uncle_hash))
 
     @public
     @decode_arg('block_number', quantity_decoder)
     @decode_arg('index', quantity_decoder)
     def getUncleByBlockNumberAndIndex(self, block_number, index):
-        block = get_block(self.chain.chain, block_number)
+        block = self.json_rpc_server.get_block(block_number)
         try:
             uncle_hash = block.uncles[index]
         except IndexError:
             raise BadRequestError('Unknown uncle')
-        return block_encoder(get_block(self.chain.chain, uncle_hash))
+        return block_encoder(self.json_rpc_server.get_block(uncle_hash))
 
     @public
     @decode_arg('block_id', block_id_decoder)
-    def call(self, data, block_id):
-        block = get_block(self.chain.chain, block_id)
+    def call(self, data, block_id=None):
+        block = self.json_rpc_server.get_block(block_id)
         # rebuild block state before finalization
         parent = block.get_parent()
         test_block = block.init_from_parent(parent, block.coinbase,
@@ -785,8 +803,8 @@ class FilterManager(Subdispatcher):
         if set(filter_dict.keys()) != expected_keys:
             raise BadRequestError('Invalid filter object')
 
-        b0 = get_block(self.chain.chain, filter_dict['fromBlock'])
-        b1 = get_block(self.chain.chain, filter_dict['toBlock'])
+        b0 = self.json_rpc_server.get_block(filter_dict['fromBlock'])
+        b1 = self.json_rpc_server.get_block(filter_dict['toBlock'])
         address = filter_dict['address']
         if is_string(address):
             addresses = [address_decoder(address)]
