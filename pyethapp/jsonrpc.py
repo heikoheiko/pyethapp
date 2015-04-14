@@ -46,23 +46,23 @@ class LoggingDispatcher(RPCDispatcher):
 
     def dispatch(self, request):
         if isinstance(request, Iterable):
-            requests = request
+            request_list = request
         else:
-            requests = [request]
-        for req in requests:
+            request_list = [request]
+        for req in request_list:
             self.logger('RPC call', method=req.method, args=req.args, kwargs=req.kwargs,
                         id=req.unique_id)
-        res = super(LoggingDispatcher, self).dispatch(request)
-        if isinstance(res, Iterable):
-            ress = res
+        response = super(LoggingDispatcher, self).dispatch(request)
+        if isinstance(response, Iterable):
+            response_list = response
         else:
-            ress = [res]
-        for res in ress:
+            response_list = [response]
+        for res in response_list:
             try:
                 self.logger('RPC result', id=res.unique_id, result=res.result)
             except AttributeError:
                 self.logger('RPC error', id=res.unique_id, error=res.error)
-        return res
+        return response
 
 
 class JSONRPCServer(BaseService):
