@@ -12,7 +12,6 @@ from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 from devp2p.app import BaseApp
 from eth_service import ChainService
-import ethereum
 from ethereum.blocks import Block
 import ethereum.slogging as slogging
 import config as konfig
@@ -125,16 +124,19 @@ def config(ctx):
 
 @app.command()
 @click.argument('file', type=click.File(), required=True)
+@click.argument('name', type=str, required=True)
 @click.pass_context
-def blocktest(ctx, file):
+def blocktest(ctx, file, name):
     """Start after importing blocks from a file.
 
-    It is recommended to turn the peermanager off when running block tests. If
-    not the local test chain will be quickly replaced by the real one.
+    In order to prevent replacement of the local test chain by the main chain from the network, the
+    peermanager, if registered, is stopped before importing any blocks.
+
+    Also, for block tests an in memory database is used. Thus, a already persisting chain stays in
+    place.
     """
     app = EthApp(ctx.obj['config'])
     app.config['db']['implementation'] = 'EphemDB'
-    app.config['deactivated_services'] += 'peermanager'
 
     # register services
     for service in services:
@@ -156,8 +158,8 @@ def blocktest(ctx, file):
         data = json.load(file)
     except ValueError:
         log.fatal('Invalid JSON file')
-    if len(data) != 1:
-        log.fatal('Invalid file (not exactly one top level element)')
+    if name not in data:
+        log.fatal('Name not found in file')
         ctx.abort()
     try:
         blocks = utils.load_block_tests(data.values()[0], app.services.chain.chain.db)
@@ -167,6 +169,8 @@ def blocktest(ctx, file):
 
     # start app
     app.start()
+    if 'peermanager' in app.services:
+        app.services.peermanager.stop()
 
     log.info('building blockchain')
     Block.is_genesis = lambda self: self.number == 0
