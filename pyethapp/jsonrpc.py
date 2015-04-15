@@ -179,8 +179,8 @@ def quantity_encoder(i):
 def data_decoder(data):
     """Decode `data` representing unformatted data."""
     if not data.startswith('0x'):
-        success = False  # must start with 0x prefix
-    elif len(data) % 2 != 0:
+        data = '0x' + data
+    if len(data) % 2 != 0:
         success = False  # must be even length
     else:
         try:
@@ -657,14 +657,20 @@ class Chain(Subdispatcher):
         return block_encoder(get_block(self.chain.chain, uncle_hash))
 
     @public
+    @encode_res(data_encoder)
+    def coinbase(self):
+        return b'\x00' * 20
+
+    @public
     @decode_arg('block_id', block_id_decoder)
+    @encode_res(data_encoder)
     def call(self, data, block_id):
         block = get_block(self.chain.chain, block_id)
         # rebuild block state before finalization
         parent = block.get_parent()
         test_block = block.init_from_parent(parent, block.coinbase,
                                             timestamp=block.timestamp)
-        for tx in block.transactions:
+        for tx in block.get_transactions():
             success, output = processblock.apply_transaction(test_block, tx)
             assert success
 
