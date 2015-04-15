@@ -606,9 +606,9 @@ class Chain(Subdispatcher):
     @decode_arg('address', address_decoder)
     @decode_arg('block_id', block_id_decoder)
     @encode_res(data_encoder)
-    def getCode(self, block_id=None):
+    def getCode(self, address, block_id=None):
         block = self.json_rpc_server.get_block(block_id)
-        return block.get_code()
+        return block.get_code(address)
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
@@ -621,7 +621,7 @@ class Chain(Subdispatcher):
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByNumber(self, block_id, include_transactions):
-        block = self.json_rpc_server.get_block(block_id=None)
+        block = self.json_rpc_server.get_block(block_id)
         return block_encoder(block, include_transactions)
 
     @public
