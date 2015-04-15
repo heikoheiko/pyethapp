@@ -121,8 +121,8 @@ class ETHProtocol(BaseProtocol):
 
         @classmethod
         def decode_payload(cls, rlp_data):
-            #fn = 'blocks256.hex.rlp'
-            #open(fn, 'w').write(rlp_data.encode('hex'))
+            # fn = 'blocks.fromthewire.hex.rlp'
+            # open(fn, 'a').write(rlp_data.encode('hex') + '\n')
             # convert to dict
             blocks = []
             for block in rlp.decode_lazy(rlp_data):

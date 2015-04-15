@@ -17,14 +17,14 @@ log = get_logger('eth.chainservice')
 
 
 # patch to get context switches between tx replay
-processblock_apply_msg = processblock._apply_msg
+processblock_apply_transaction = processblock.apply_transaction
 
 
-def _apply_msg(ext, msg, code):
-    log.debug('apply_msg ctx switch')
+def apply_transaction(block, tx):
+    log.debug('apply_transaction ctx switch', at=time.time())
     gevent.sleep(0.001)
-    return processblock_apply_msg(ext, msg, code)
-processblock._apply_msg = _apply_msg
+    return processblock_apply_transaction(block, tx)
+processblock.apply_transaction = apply_transaction
 
 
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
@@ -227,6 +227,8 @@ class ChainService(WiredService):
     def on_receive_transactions(self, proto, transactions):
         "receives rlp.decoded serialized"
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
+        log.debug('skipping, FIXME')
+        return
         for tx in transactions:
             # fixme bloomfilter
             self.chain.add_transaction(tx)
