@@ -21,6 +21,7 @@ from eth_protocol import ETHProtocol
 log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
 
+
 # hack to return the correct json rpc error code if the param count is wrong
 # (see https://github.com/mbr/tinyrpc/issues/19)
 def public(f):
@@ -221,9 +222,9 @@ def quantity_encoder(i):
 def data_decoder(data):
     """Decode `data` representing unformatted data."""
     if not data.startswith('0x'):
-        success = False  # must start with 0x prefix
-#    elif len(data) % 2 != 0:
-#        success = False  # must be even length
+        data = '0x' + data
+    if len(data) % 2 != 0:
+        success = False  # must be even length
     else:
         if len(data) % 2 != 0:  # TODO: remove
             data += '0'         # TODO: remove
@@ -346,7 +347,7 @@ def tx_encoder(transaction, block, i, pending):
 def loglist_encoder(loglist):
     """Encode a list of log"""
     l = []
-    if len(loglist) > 0 and loglist[0] == None:
+    if len(loglist) > 0 and loglist[0] is None:
         assert all(element is None for element in l)
         return l
     result = []
@@ -677,6 +678,11 @@ class Chain(Subdispatcher):
         return block_encoder(self.json_rpc_server.get_block(uncle_hash))
 
     @public
+    @encode_res(data_encoder)
+    def coinbase(self):
+        return b'\x00' * 20
+
+    @public
     @decode_arg('block_id', block_id_decoder)
     def call(self, data, block_id=None):
         block = self.json_rpc_server.get_block(block_id)
@@ -684,7 +690,7 @@ class Chain(Subdispatcher):
         parent = block.get_parent()
         test_block = block.init_from_parent(parent, block.coinbase,
                                             timestamp=block.timestamp)
-        for tx in block.transactions:
+        for tx in block.get_transactions():
             success, output = processblock.apply_transaction(test_block, tx)
             assert success
 
