@@ -107,6 +107,9 @@ class ChainService(WiredService):
             if t_block.header.prevhash not in self.chain:
                 log.debug('unknown parent', block=t_block,
                           parent=t_block.header.prevhash.encode('hex'))
+                # FIXME: not properly handled if we receive a differnt chain?
+                # no problem with new getBlocks?
+                self.synchronizer.synchronize_unknown_block(proto, t_block.header.hash)
                 continue
 
             log.debug('checking pow', block=t_block)
@@ -136,6 +139,7 @@ class ChainService(WiredService):
                 self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
+                # gets never called # FIXME
                 log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
                     log.warn('wrong genesis', block=t_block, proto=proto)
