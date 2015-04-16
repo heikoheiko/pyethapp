@@ -21,6 +21,23 @@ from eth_protocol import ETHProtocol
 log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
 
+# route logging messages
+
+
+class WSGIServerLogger(object):
+
+    _log = slogging.get_logger('jsonrpc.wsgi')
+
+    @classmethod
+    def log(cls, msg):
+        cls._log.debug(msg.strip())
+    write = log
+
+    def log_error(cls, msg, *args):
+        cls._log.error(msg % args)
+
+gevent.wsgi.WSGIHandler.log_error = WSGIServerLogger.log_error
+
 
 # hack to return the correct json rpc error code if the param count is wrong
 # (see https://github.com/mbr/tinyrpc/issues/19)
@@ -96,7 +113,7 @@ class JSONRPCServer(BaseService):
         self.listen_port = app.config['jsonrpc']['listen_port']
         self.listen_host = app.config['jsonrpc']['listen_host']
         self.wsgi_server = gevent.wsgi.WSGIServer((self.listen_host, self.listen_port),
-                                                  transport.handle)
+                                                  transport.handle, log=WSGIServerLogger)
         self.rpc_server = RPCServerGreenlets(
             transport,
             JSONRPCProtocol(),
