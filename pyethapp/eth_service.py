@@ -67,7 +67,7 @@ class ChainService(WiredService):
         self.miner = Miner(self.chain.head_candidate)
         # if we are not syncing, forward all blocks
         if not self.synchronizer.synchronization_tasks:
-            log.debug("broadcasting new head", block=block)
+            log.debug("_on_new_head", block=block)
             # signals.broadcast_new_block.send(sender=None, block=block)  # FIXME
 
     def loop_body(self):
@@ -87,7 +87,7 @@ class ChainService(WiredService):
             # create new block
             assert self.chain.add_block(block), ("newly mined block is invalid!?", block)
 
-    def receive_chain(self, transient_blocks, proto=None):
+    def receive_chain(self, transient_blocks, proto=None, new_block=False):
         _db = EphemDB()
         # assuming to receive chain order w/ oldest block first
         transient_blocks.sort(key=lambda x: x.header.number)
@@ -97,8 +97,6 @@ class ChainService(WiredService):
         self.synchronizer.received_blocks(proto, transient_blocks)
 
         for t_block in transient_blocks:  # oldest to newest
-
-            gevent.sleep(0.001)  # ctx switch
 
             if t_block.header.hash in self.chain:
                 log.debug('known', block=t_block)
@@ -117,6 +115,8 @@ class ChainService(WiredService):
             if not t_block.header.check_pow(_db):
                 log.warn('invalid pow', block=t_block, proto=proto)
                 continue
+
+            # BROADCAST HERE !!!
 
             log.debug('deserializing', block=t_block, gas_used=t_block.header.gas_used)
             if t_block.header.prevhash == self.chain.head.hash:
@@ -172,11 +172,19 @@ class ChainService(WiredService):
             else:
                 assert block.has_parent()
                 # assume single block is newly mined block
+                old_head_num = self.chain.head.number
                 success = self.chain.add_block(block)
                 if success:
                     log.debug('added', block=block)
                 else:
                     raise eth_protocol.ETHProtocolError('could not add block')
+
+                # broadcast
+                if block.number > old_head_num and new_block:
+                    log.debug('broadcasting new head', block=block)
+                    f = self.app.services.peermanager.broadcast
+                    f(eth_protocol.ETHProtocol, 'newblock', args=(block, block.chain_difficulty()),
+                      num_peers=None, exclude_protos=[proto])
 
     # wire protocol receivers ###########
 
@@ -271,8 +279,9 @@ class ChainService(WiredService):
                 found.append(self.chain.get(bh))
             else:
                 log.debug("unknown block requested", block_hash=encode_hex(bh))
-        log.debug("found", count=len(found))
-        proto.send_blocks(*found)
+        if found:
+            log.debug("found", count=len(found), first=found[0].hex_hash())
+            proto.send_blocks(*found)
 
     def on_receive_blocks(self, proto, transient_blocks):
         log.debug("recv remote blocks", count=len(transient_blocks), remote_id=proto,
@@ -282,4 +291,4 @@ class ChainService(WiredService):
 
     def on_receive_newblock(self, proto, block, total_difficulty):
         log.debug("recv new remote block", block=block, remote_id=proto)
-        self.receive_chain([block], proto)
+        self.receive_chain([block], proto, new_block=True)

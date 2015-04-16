@@ -18,12 +18,7 @@ class HashChainTask(object):
         self.chain = chain
         self.proto = proto
         self.hash_chain = []  # [youngest, ..., oldest]
-        self.last_response = time.time()
         self.request(block_hash)
-
-    @property
-    def did_timeout(self):
-        return time.time() - self.last_response > self.timeout
 
     def request(self, block_hash):
         log.debug('requesting block_hashes', proto=self.proto, start=encode_hex(block_hash))
@@ -31,7 +26,6 @@ class HashChainTask(object):
 
     def received_block_hashes(self, block_hashes):
         log.debug('HashChainTask.received_block_hashes', num=len(block_hashes), proto=self.proto)
-        self.last_response = time.time()
         if block_hashes and self.chain.genesis.hash == block_hashes[-1]:
             log.debug('has different chain starting from genesis')
         for bh in block_hashes:
@@ -73,13 +67,14 @@ class SynchronizationTask(object):
 
     @property
     def did_timeout(self):
-        b = time.time() - self.last_response > self.timeout and self.hash_chain_task.did_timeout
+        b = time.time() - self.last_response > self.timeout
         if b:
             log.debug('did timeout', proto=self.proto)
         return b
 
     def received_block_hashes(self, block_hashes):
-        self.last_response = time.time()
+        if block_hashes:  # requires success
+            self.last_response = time.time()
         res = self.hash_chain_task.received_block_hashes(block_hashes)
         log.debug('ST.received_block_hashes', proto=self.proto, num=len(res))
         if res:
@@ -88,7 +83,8 @@ class SynchronizationTask(object):
             self.request_blocks()
 
     def received_blocks(self, transient_blocks):
-        self.last_response = time.time()
+        if transient_blocks:  # requires success
+            self.last_response = time.time()
         log.debug('blocks received', proto=self.proto, num=len(
             transient_blocks), missing=len(self.hash_chain))
         for tb in transient_blocks:
@@ -167,7 +163,9 @@ class Synchronizer(object):
             log.debug('new sync task', proto=proto)
             self.synchronization_tasks[proto] = SynchronizationTask(self.chain, proto, block_hash)
         else:
-            log.debug('existing synctask', proto=proto)
+            elapsed = time.time() - self.synchronization_tasks[proto].last_response
+            assert elapsed < SynchronizationTask.timeout
+            log.debug('existing synctask', proto=proto, elapsed=elapsed)
 
     def synchronize_status(self, proto, block_hash, total_difficulty):
         "Case: unknown head with sufficient difficulty"
