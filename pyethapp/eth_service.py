@@ -17,14 +17,14 @@ log = get_logger('eth.chainservice')
 
 
 # patch to get context switches between tx replay
-processblock_apply_msg = processblock._apply_msg
+processblock_apply_transaction = processblock.apply_transaction
 
 
-def _apply_msg(ext, msg, code):
-    log.debug('apply_msg ctx switch')
-    gevent.sleep(0)
-    return processblock_apply_msg(ext, msg, code)
-processblock._apply_msg = _apply_msg
+def apply_transaction(block, tx):
+    log.debug('apply_transaction ctx switch', at=time.time())
+    gevent.sleep(0.001)
+    return processblock_apply_transaction(block, tx)
+processblock.apply_transaction = apply_transaction
 
 
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
@@ -107,6 +107,9 @@ class ChainService(WiredService):
             if t_block.header.prevhash not in self.chain:
                 log.debug('unknown parent', block=t_block,
                           parent=t_block.header.prevhash.encode('hex'))
+                # FIXME: not properly handled if we receive a differnt chain?
+                # no problem with new getBlocks?
+                self.synchronizer.synchronize_unknown_block(proto, t_block.header.hash)
                 continue
 
             log.debug('checking pow', block=t_block)
@@ -136,6 +139,7 @@ class ChainService(WiredService):
                 self.synchronizer.stop_synchronization(proto)
                 return
             except blocks.UnknownParentException:
+                # gets never called # FIXME
                 log.debug('unknown parent', block=t_block)
                 if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
                     log.warn('wrong genesis', block=t_block, proto=proto)
@@ -223,6 +227,8 @@ class ChainService(WiredService):
     def on_receive_transactions(self, proto, transactions):
         "receives rlp.decoded serialized"
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
+        log.debug('skipping, FIXME')
+        return
         for tx in transactions:
             # fixme bloomfilter
             self.chain.add_transaction(tx)

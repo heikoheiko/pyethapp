@@ -1,6 +1,7 @@
 
 from rlp.utils import encode_hex
 from ethereum.slogging import get_logger
+import time
 log = get_logger('eth.sync')
 
 
@@ -11,12 +12,18 @@ class HashChainTask(object):
     """
 
     NUM_HASHES_PER_REQUEST = 2000
+    timeout = 2.
 
     def __init__(self, chain, proto, block_hash):
         self.chain = chain
         self.proto = proto
         self.hash_chain = []  # [youngest, ..., oldest]
+        self.last_response = time.time()
         self.request(block_hash)
+
+    @property
+    def did_timeout(self):
+        return time.time() - self.last_response > self.timeout
 
     def request(self, block_hash):
         log.debug('requesting block_hashes', proto=self.proto, start=encode_hex(block_hash))
@@ -24,6 +31,7 @@ class HashChainTask(object):
 
     def received_block_hashes(self, block_hashes):
         log.debug('HashChainTask.received_block_hashes', num=len(block_hashes))
+        self.last_response = time.time()
         if block_hashes and self.chain.genesis.hash == block_hashes[-1]:
             log.debug('has different chain starting from genesis', proto=self.proto)
         for bh in block_hashes:
@@ -49,6 +57,7 @@ class SynchronizationTask(object):
         - rerequest blocks that lacked a reference before syncing
     """
     NUM_BLOCKS_PER_REQUEST = 200
+    timeout = 2.
 
     def __init__(self, chain, proto, block_hash):
         self.chain = chain
@@ -56,8 +65,17 @@ class SynchronizationTask(object):
         self.hash_chain = []  # [oldest to youngest]
         log.debug('syncing', proto=self.proto, hash=encode_hex(block_hash))
         self.hash_chain_task = HashChainTask(self.chain, self.proto, block_hash)
+        self.last_response = time.time()
+
+    @property
+    def did_timeout(self):
+        b = time.time() - self.last_response > self.timeout and self.hash_chain_task.did_timeout
+        if b:
+            log.debug('did timeout', proto=self.proto)
+        return b
 
     def received_block_hashes(self, block_hashes):
+        self.last_response = time.time()
         res = self.hash_chain_task.received_block_hashes(block_hashes)
         if res:
             self.hash_chain = res
@@ -65,6 +83,7 @@ class SynchronizationTask(object):
             self.request_blocks()
 
     def received_blocks(self, transient_blocks):
+        self.last_response = time.time()
         log.debug('blocks received', proto=self.proto, num=len(
             transient_blocks), missing=len(self.hash_chain))
         for tb in transient_blocks:
@@ -100,7 +119,8 @@ class Synchronizer(object):
         if we have not yet syncer for this unknown block:
             create new syncer
             sync direction genesis until we see known block_hash
-            sync also (re)requests the block we missed, so it can be added on top of the synced chain
+            sync also (re)requests the block we missed, so it can be added on top of the
+                synced chain
         else
             do nothing
             syncing (if finished) will be started with the next broadcasted block w/ missing parent
@@ -122,10 +142,12 @@ class Synchronizer(object):
             log.debug('known_hash, skipping', proto=proto, hash=encode_hex(block_hash))
             return
 
-        if proto is not None and (proto not in self.synchronization_tasks) or force:
+        if proto is None:
+            return
+        if force or proto not in self.synchronization_tasks \
+                or self.synchronization_tasks[proto].did_timeout:
             log.debug('new sync task', proto=proto)
-            self.synchronization_tasks[proto] = SynchronizationTask(
-                self.chain, proto, block_hash)
+            self.synchronization_tasks[proto] = SynchronizationTask(self.chain, proto, block_hash)
         else:
             log.debug('existing synctask', proto=proto)
 
