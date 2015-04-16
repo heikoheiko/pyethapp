@@ -30,14 +30,17 @@ class HashChainTask(object):
         self.proto.send_getblockhashes(block_hash, self.NUM_HASHES_PER_REQUEST)
 
     def received_block_hashes(self, block_hashes):
-        log.debug('HashChainTask.received_block_hashes', num=len(block_hashes))
+        log.debug('HashChainTask.received_block_hashes', num=len(block_hashes), proto=self.proto)
         self.last_response = time.time()
         if block_hashes and self.chain.genesis.hash == block_hashes[-1]:
-            log.debug('has different chain starting from genesis', proto=self.proto)
+            log.debug('has different chain starting from genesis')
         for bh in block_hashes:
             if bh in self.chain or bh == self.chain.genesis.hash:
-                log.debug('matching block hash found', proto=self.proto,
+                log.debug('matching block hash found',
                           hash=encode_hex(bh), num_to_fetch=len(self.hash_chain))
+                if not self.hash_chain:
+                    log.debug('matching block hash found, not missing anymore',
+                              block_num=self.chain.get(bh).number)
                 return list(reversed(self.hash_chain))
             self.hash_chain.append(bh)
         if len(block_hashes) == 0:
@@ -62,6 +65,7 @@ class SynchronizationTask(object):
     def __init__(self, chain, proto, block_hash):
         self.chain = chain
         self.proto = proto
+        self.block_hash = block_hash
         self.hash_chain = []  # [oldest to youngest]
         log.debug('syncing', proto=self.proto, hash=encode_hex(block_hash))
         self.hash_chain_task = HashChainTask(self.chain, self.proto, block_hash)
@@ -77,9 +81,10 @@ class SynchronizationTask(object):
     def received_block_hashes(self, block_hashes):
         self.last_response = time.time()
         res = self.hash_chain_task.received_block_hashes(block_hashes)
+        log.debug('ST.received_block_hashes', proto=self.proto, num=len(res))
         if res:
-            self.hash_chain = res
-            log.debug('receieved hash chain', proto=self.proto, num=len(self.hash_chain))
+            self.hash_chain = res + [self.block_hash]
+            log.debug('completed hash chain', proto=self.proto, num=len(res))
             self.request_blocks()
 
     def received_blocks(self, transient_blocks):
@@ -135,17 +140,30 @@ class Synchronizer(object):
         if proto in self.synchronization_tasks:
             del self.synchronization_tasks[proto]
 
-    def synchronize_unknown_block(self, proto, block_hash, force=False):
+    def _cleanup(self):
+        for proto, t in self.synchronization_tasks.items():
+            if t.did_timeout:
+                log.debug('deleting timed out task', proto=proto)
+                del self.synchronization_tasks[proto]
+
+    def synchronize_unknown_block(self, proto, block_hash, force=False, t_block=None):
         "Case: block with unknown parent. Fetches unknown ancestors and this block"
         log.debug('sync unknown', proto=proto, block=encode_hex(block_hash))
+        self._cleanup()
+        # check if we are just one block away, if so request the missing block only
+        if t_block and t_block.header.number - self.chain.head.number == 2:
+            # we are probably only missing one block in between
+            assert t_block.header.hash == block_hash
+            log.debug('trying to sync INBETWEEN', proto=proto, hash=encode_hex(block_hash))
+            proto.send_getblocks(*[t_block.header.prevhash, block_hash])
+            # and also do the ordinary syncing
+
         if block_hash == self.chain.genesis.hash or block_hash in self.chain:
             log.debug('known_hash, skipping', proto=proto, hash=encode_hex(block_hash))
             return
-
         if proto is None:
             return
-        if force or proto not in self.synchronization_tasks \
-                or self.synchronization_tasks[proto].did_timeout:
+        if force or proto not in self.synchronization_tasks:
             log.debug('new sync task', proto=proto)
             self.synchronization_tasks[proto] = SynchronizationTask(self.chain, proto, block_hash)
         else:
@@ -155,7 +173,7 @@ class Synchronizer(object):
         "Case: unknown head with sufficient difficulty"
         log.debug('sync status', proto=proto,  hash=block_hash.encode('hex'),
                   total_difficulty=total_difficulty)
-
+        self._cleanup()
         # guesstimate the max difficulty difference possible for a sucessfully competing chain
         # worst case if skip it: we are on a stale chain until the other catched up
         # assume difficulty is constant

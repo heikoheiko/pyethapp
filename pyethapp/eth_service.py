@@ -109,7 +109,8 @@ class ChainService(WiredService):
                           parent=t_block.header.prevhash.encode('hex'))
                 # FIXME: not properly handled if we receive a differnt chain?
                 # no problem with new getBlocks?
-                self.synchronizer.synchronize_unknown_block(proto, t_block.header.hash)
+                self.synchronizer.synchronize_unknown_block(proto, t_block.header.hash,
+                                                            t_block=t_block)
                 continue
 
             log.debug('checking pow', block=t_block)
@@ -164,7 +165,7 @@ class ChainService(WiredService):
                     if proto is not None:
                         # request chain for newest known hash
                         self.synchronizer.synchronize_unknown_block(
-                            proto, transient_blocks[-1].header.hash)
+                            proto, transient_blocks[-1].header.hash, t_block=transient_blocks[-1])
                 break
             if block.hash in self.chain:
                 log.debug('known', block=block)
