@@ -684,7 +684,7 @@ class Chain(Subdispatcher):
         try:
             uncle_hash = block.uncles[index].hash
         except IndexError:
-            raise BadRequestError('Unknown uncle')
+            return None
         return block_encoder(self.json_rpc_server.get_block(uncle_hash))
 
     @public
@@ -695,7 +695,7 @@ class Chain(Subdispatcher):
         try:
             uncle_hash = block.uncles[index].hash
         except IndexError:
-            raise BadRequestError('Unknown uncle')
+            return None
         return block_encoder(self.json_rpc_server.get_block(uncle_hash))
 
     @public
