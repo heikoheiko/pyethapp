@@ -334,7 +334,7 @@ def block_encoder(block, include_transactions, pending=False):
         for i, tx in enumerate(block.get_transactions()):
             d['transactions'].append(tx_encoder(tx, block, i, pending))
     else:
-        d['transactions'] = [quantity_encoder(tx.hash) for x in block.get_transactions()]
+        d['transactions'] = [data_encoder(tx.hash) for tx in block.get_transactions()]
     return d
 
 
@@ -348,7 +348,7 @@ def tx_encoder(transaction, block, i, pending):
         'hash': data_encoder(transaction.hash),
         'nonce': quantity_encoder(transaction.nonce),
         'blockHash': data_encoder(block.hash),
-        'blockNumber': quantity_encoder(block.number) if pending else None,
+        'blockNumber': quantity_encoder(block.number) if not pending else None,
         'transactionIndex': quantity_encoder(i),
         'from': data_encoder(transaction.sender),
         'to': data_encoder(transaction.to),
@@ -651,7 +651,7 @@ class Chain(Subdispatcher):
         try:
             tx, block, index = self.chain.chain.index.get_transaction(tx_hash)
         except KeyError:
-            raise BadRequestError('Unknown transaction')
+            return None
         return tx_encoder(tx, block, index, False)
 
     @public
@@ -662,7 +662,7 @@ class Chain(Subdispatcher):
         try:
             tx = block.get_transaction(index)
         except IndexError:
-            raise BadRequestError('Unknown transaction')
+            return None
         return tx_encoder(tx, block, index, False)
 
     @public
@@ -673,7 +673,7 @@ class Chain(Subdispatcher):
         try:
             tx = block.get_transaction(index)
         except IndexError:
-            raise BadRequestError('Unknown transaction')
+            return None
         return tx_encoder(tx, block, index, block_id == 'pending')
 
     @public
