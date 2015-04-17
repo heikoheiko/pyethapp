@@ -76,7 +76,6 @@ class SynchronizationTask(object):
         if block_hashes:  # requires success
             self.last_response = time.time()
         res = self.hash_chain_task.received_block_hashes(block_hashes)
-        log.debug('ST.received_block_hashes', proto=self.proto, num=len(res))
         if res:
             self.hash_chain = res + [self.block_hash]
             log.debug('completed hash chain', proto=self.proto, num=len(res))
