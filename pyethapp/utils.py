@@ -1,7 +1,5 @@
-import json
 import ethereum
 from ethereum.blocks import Block, genesis
-from ethereum.db import EphemDB
 import rlp
 
 def _load_contrib_services(config):  # FIXME
@@ -37,26 +35,18 @@ def load_block_tests(data, db):
     :raises: :exc:`KeyError` if the file is missing required data fields
     :returns: a list of blocks in an ephem db
     """
-    b = genesis(db, data['pre'])
-    gbh = data["genesisBlockHeader"]
-    b.bloom = ethereum.utils.scanners['int256b'](gbh['bloom'])
-    b.timestamp = ethereum.utils.scanners['int'](gbh['timestamp'])
-    b.nonce = ethereum.utils.scanners['bin'](gbh['nonce'])
-    b.extra_data = ethereum.utils.scanners['bin'](gbh['extraData'])
-    b.gas_limit = ethereum.utils.scanners['int'](gbh['gasLimit'])
-    b.gas_used = ethereum.utils.scanners['int'](gbh['gasUsed'])
-    b.coinbase = ethereum.utils.decode_hex(gbh['coinbase'])
-    b.difficulty = int(gbh['difficulty'])
-    b.prevhash = ethereum.utils.scanners['bin'](gbh['parentHash'])
-    b.mixhash = ethereum.utils.scanners['bin'](gbh['mixHash'])
-    if (b.hash != ethereum.utils.scanners['bin'](gbh['hash']) or
-        b.receipts.root_hash != ethereum.utils.scanners['bin'](gbh['receiptTrie']) or
-        b.transactions.root_hash != ethereum.utils.scanners['bin'](gbh['transactionsTrie']) or
-        b.state.root_hash != ethereum.utils.scanners['bin'](gbh['stateRoot']) or
-        ethereum.utils.sha3rlp(b.uncles) != ethereum.utils.scanners['bin'](gbh['uncleHash']) or
-        not b.header.check_pow()):
-        raise ValueError('Invalid genesis block')
-    blocks = [b]
+    scanners = ethereum.utils.scanners
+    initial_alloc = {}
+    for address, acct_state in data['pre'].items():
+        initial_alloc[ethereum.utils.decode_hex(address)] = {
+            'balance': scanners['int256b'](acct_state['balance'][2:]),
+            'code': acct_state['code'],
+            'nonce': scanners['int256b'](acct_state['nonce'][2:]) or '0',
+            'storage': acct_state['storage']
+        }
+    genesis(db, initial_alloc)  # builds the state trie
+    genesis_block = rlp.decode(ethereum.utils.decode_hex(data['genesisRLP'][2:]), Block, db=db)
+    blocks = [genesis_block]
     for blk in data['blocks']:
         rlpdata = ethereum.utils.decode_hex(blk['rlp'][2:])
         blocks.append(rlp.decode(rlpdata, Block, db=db, parent=blocks[-1]))
