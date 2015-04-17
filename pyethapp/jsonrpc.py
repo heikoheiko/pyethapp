@@ -131,7 +131,7 @@ class JSONRPCServer(BaseService):
         log.info('stopping JSONRPCServer')
         self.wsgi_thread.kill()
 
-    def get_block(self, chain, block_id=None):
+    def get_block(self, block_id=None):
         """Return the block identified by `block_id`.
 
         This method also sets :attr:`default_block` to the value of `block_id`
@@ -430,7 +430,7 @@ class Net(Subdispatcher):
 
     @public
     def version(self):
-        return ETHProtocol.version
+        return str(ETHProtocol.version)
 
     @public
     def listening(self):
