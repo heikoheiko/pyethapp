@@ -207,7 +207,8 @@ class Subdispatcher(object):
 
 
 def quantity_decoder(data):
-    """Decode `data` representing a quantity."""
+    """Decode `data` representing a quantity.
+    """
     if not is_string(data):
         success = False
     elif not data.startswith('0x'):
@@ -251,9 +252,17 @@ def data_decoder(data):
     raise BadRequestError('Invalid data encoding')
 
 
-def data_encoder(data):
-    """Encode unformatted binary `data`."""
-    return '0x' + encode_hex(data)
+def data_encoder(data, length=None):
+    """Encode unformatted binary `data`.
+
+    If `length` is given, the result will be padded like this: ``quantity_encoder(255, 3) ==
+    '0x0000ff'``.
+    """
+    s = encode_hex(data)
+    if length is None:
+        return '0x' + s
+    else:
+        return '0x' + s.rjust(length * 2, '0')
 
 
 def address_decoder(data):
@@ -315,7 +324,7 @@ def block_encoder(block, include_transactions, pending=False):
         'parentHash': data_encoder(block.prevhash),
         'nonce': data_encoder(block.nonce),
         'sha3Uncles': data_encoder(block.uncles_hash),
-        'logsBloom': data_encoder(int_to_big_endian(block.bloom)),
+        'logsBloom': data_encoder(int_to_big_endian(block.bloom), 256),
         'transactionsRoot': data_encoder(block.tx_list_root),
         'stateRoot': data_encoder(block.state_root),
         'miner': data_encoder(block.coinbase),
@@ -635,14 +644,20 @@ class Chain(Subdispatcher):
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByHash(self, block_hash, include_transactions):
-        block = self.json_rpc_server.get_block(block_hash)
+        try:
+            block = self.json_rpc_server.get_block(block_hash)
+        except KeyError:
+            return None
         return block_encoder(block, include_transactions)
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByNumber(self, block_id, include_transactions):
-        block = self.json_rpc_server.get_block(block_id)
+        try:
+            block = self.json_rpc_server.get_block(block_id)
+        except KeyError:
+            return None
         return block_encoder(block, include_transactions)
 
     @public
