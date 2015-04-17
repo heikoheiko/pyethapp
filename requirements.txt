@@ -1,4 +1,5 @@
 CodernityDB
+leveldb
 click
 decorator
 gevent
