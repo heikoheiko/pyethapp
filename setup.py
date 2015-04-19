@@ -41,7 +41,7 @@ test_requirements = []
 
 setup(
     name='pyethapp',
-    version='0.1.1',
+    version='0.1.2',
     description="Python Ethereum Client",
     long_description=readme + '\n\n' + history,
     author="HeikoHeiko",

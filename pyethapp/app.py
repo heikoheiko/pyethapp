@@ -29,11 +29,8 @@ services += utils.load_contrib_services()
 
 
 class EthApp(BaseApp):
-
-    client_version = 'pyethapp/v%s/%s/%s/%s' % (__version__,
-                                                sys.platform,
-                                                'py%d.%d.%d' % sys.version_info[:3],
-                                                os.getlogin())  # FIXME: for development only
+    client_version = 'pyethapp/v%s/%s/%s' % (__version__, sys.platform,
+                                             'py%d.%d.%d' % sys.version_info[:3])
     default_config = dict(BaseApp.default_config)
     default_config['client_version'] = client_version
 
@@ -92,6 +89,11 @@ def run(ctx, dev):
 
     if dev:
         gevent.get_hub().SYSTEM_ERROR = BaseException
+        try:
+            ctx.obj['config']['client_version'] += '/' + os.getlogin()
+        except:
+            log.warn("can't get and add login name to client_version")
+            pass
 
     # register services
     for service in services:
