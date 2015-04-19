@@ -112,7 +112,7 @@ class ChainService(WiredService):
                 continue
 
             log.debug('checking pow', block=t_block)
-            if not t_block.header.check_pow(_db):
+            if not t_block.header.check_pow():
                 log.warn('invalid pow', block=t_block, proto=proto)
                 continue
 

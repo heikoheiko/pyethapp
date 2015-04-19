@@ -329,6 +329,7 @@ def block_encoder(block, include_transactions, pending=False):
         'stateRoot': data_encoder(block.state_root),
         'miner': data_encoder(block.coinbase),
         'difficulty': quantity_encoder(block.difficulty),
+        'coinbase': address_encoder(block.coinbase),
         'totalDifficulty': quantity_encoder(block.chain_difficulty()),
         'extraData': data_encoder(block.extra_data),
         'size': quantity_encoder(len(rlp.encode(block))),
