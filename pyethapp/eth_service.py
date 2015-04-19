@@ -182,9 +182,12 @@ class ChainService(WiredService):
                 # broadcast
                 if block.number > old_head_num and new_block:
                     log.debug('broadcasting new head', block=block)
-                    f = self.app.services.peermanager.broadcast
-                    f(eth_protocol.ETHProtocol, 'newblock', args=(block, block.chain_difficulty()),
-                      num_peers=None, exclude_protos=[proto])
+                    self.broadcast(block, proto)
+
+    def broadcast(self, block, proto=None):
+        f = self.app.services.peermanager.broadcast
+        f(eth_protocol.ETHProtocol, 'newblock', args=(block, block.chain_difficulty()),
+          num_peers=None, exclude_protos=[proto])
 
     # wire protocol receivers ###########
 

@@ -1,7 +1,7 @@
 from decorator import decorator
 from collections import Iterable
 import inspect
-from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3
+from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3, zpad
 import ethereum.slogging as slogging
 from ethereum.transactions import Transaction
 from ethereum import processblock
@@ -713,6 +713,46 @@ class Chain(Subdispatcher):
         except IndexError:
             return None
         return block_encoder(self.json_rpc_server.get_block(uncle_hash))
+
+    @public
+    def getWork(self):
+        print 'Sending work...'
+        h = self.chain.chain.head_candidate
+        return [
+            encode_hex(h.header.mining_hash),
+            encode_hex(h.header.seed),
+            encode_hex(zpad(int_to_big_endian(2**256 // h.header.difficulty), 32))
+        ]
+
+    @public
+    def test(self, nonce):
+        print 80808080808
+        return nonce
+
+    @public
+    @decode_arg('nonce', data_decoder)
+    @decode_arg('mining_hash', data_decoder)
+    @decode_arg('mix_digest', data_decoder)
+    def submitWork(self, nonce, mining_hash, mix_digest):
+        print 'submitting work'
+        h = self.chain.chain.head_candidate
+        print 'header: %s' % encode_hex(rlp.encode(h))
+        if h.header.mining_hash != mining_hash:
+            return False
+        print 'mining hash: %s' % encode_hex(mining_hash)
+        print 'nonce: %s' % encode_hex(nonce)
+        print 'mixhash: %s' % encode_hex(mix_digest)
+        print 'seed: %s' % encode_hex(h.header.seed)
+        h.header.nonce = nonce
+        h.header.mixhash = mix_digest
+        if not h.header.check_pow():
+            print 'PoW check false'
+            return False
+        print 'PoW check true'
+        self.chain.chain.add_block(h)
+        self.chain.broadcast(h)
+        print 'Added: %d' % h.header.number
+        return True
 
     @public
     @encode_res(data_encoder)
