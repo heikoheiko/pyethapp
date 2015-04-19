@@ -25,6 +25,9 @@ class ETHProtocol(BaseProtocol):
     version = 60
     network_id = 0
 
+    max_getblocks_count = 512
+    max_getbockhashes_count = 2048
+
     def __init__(self, peer, service):
         # required by P2PProtocol
         self.config = peer.config
@@ -45,13 +48,14 @@ class ETHProtocol(BaseProtocol):
         structure = [
             ('eth_version', rlp.sedes.big_endian_int),
             ('network_id', rlp.sedes.big_endian_int),
-            ('total_difficulty', rlp.sedes.big_endian_int),
+            ('chain_difficulty', rlp.sedes.big_endian_int),
             ('chain_head_hash', rlp.sedes.binary),
             ('genesis_hash', rlp.sedes.binary)]
 
-        def create(self, proto, total_difficulty, chain_head_hash, genesis_hash):
+        def create(self, proto, chain_difficulty, chain_head_hash, genesis_hash):
             self.sent = True
-            return [proto.version, proto.network_id, total_difficulty, chain_head_hash, genesis_hash]
+            return [proto.version, proto.network_id, chain_difficulty, chain_head_hash,
+                    genesis_hash]
 
     class gettransactions(BaseProtocol.command):
 
@@ -138,7 +142,7 @@ class ETHProtocol(BaseProtocol):
         the format described in the main Ethereum specification.
         """
         cmd_id = 7
-        structure = [('block', Block), ('total_difficulty', rlp.sedes.big_endian_int)]
+        structure = [('block', Block), ('chain_difficulty', rlp.sedes.big_endian_int)]
 
         # todo: bloomfilter: so we don't send block to the originating peer
 
