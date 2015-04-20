@@ -25,8 +25,8 @@ class ETHProtocol(BaseProtocol):
     version = 60
     network_id = 0
 
-    max_getblocks_count = 512
-    max_getbockhashes_count = 2048
+    max_getblocks_count = 256
+    max_getblockhashes_count = 2048
 
     def __init__(self, peer, service):
         # required by P2PProtocol
@@ -158,23 +158,28 @@ class ETHProtocol(BaseProtocol):
             return dict((cls.structure[i][0], v) for i, v in enumerate(data))
 
 
-class TransientBlock(object):
+class TransientBlock(rlp.Serializable):
 
     """A partially decoded, unvalidated block."""
 
+    fields = [
+        ('header', BlockHeader),
+        ('transaction_list', rlp.sedes.CountableList(Transaction)),
+        ('uncles', rlp.sedes.CountableList(BlockHeader))
+    ]
+
     def __init__(self, block_data):
         self.header = BlockHeader.deserialize(block_data[0])
-        self.transaction_list = block_data[1]
-        self.uncles = block_data[2]
+        self.transaction_list = rlp.sedes.CountableList(Transaction).deserialize(block_data[1])
+        self.uncles = rlp.sedes.CountableList(BlockHeader).deserialize(block_data[2])
 
     def to_block(self, db, parent=None):
         """Convert the transient block to a :class:`ethereum.blocks.Block`"""
-        tx_list = rlp.sedes.CountableList(Transaction).deserialize(self.transaction_list)
-        uncles = rlp.sedes.CountableList(BlockHeader).deserialize(self.uncles)
-        return Block(self.header, tx_list, uncles, db=db, parent=parent)
+        return Block(self.header, self.transaction_list, self.uncles, db=db, parent=parent)
 
-    def serialize(self):
-        return rlp.encode([self.header.serialize(self.header), self.transaction_list, self.uncles])
+    # def serialize(self):
+    # return rlp.encode([self.header.serialize(self.header),
+    # self.transaction_list, self.uncles])
 
     @property
     def hex_hash(self):
