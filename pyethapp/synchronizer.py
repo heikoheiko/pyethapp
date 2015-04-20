@@ -1,7 +1,7 @@
 from gevent.event import AsyncResult
 import gevent
 from ethereum.slogging import get_logger
-log = get_logger('eth.sync')
+log = get_logger('eth.synctask')
 
 
 class SyncTask(object):
@@ -123,6 +123,7 @@ class SyncTask(object):
                 assert proto not in self.requests
                 assert not proto.is_stopped
                 # request
+                log.debug('requesting blocks', num=len(blockhashes_batch))
                 deferred = AsyncResult()
                 self.requests[proto] = deferred
                 proto.send_getblocks(*blockhashes_batch)
@@ -151,9 +152,13 @@ class SyncTask(object):
                 log.warn('failed to fetch blocks', missing=len(blockhashes_chain))
                 return self.exit(success=False)
 
+            import time
+            ts = time.time()
+            log.debug('adding blocks', qsize=self.chainservice.block_queue.qsize())
             for t_block in t_blocks:
                 assert t_block.header.hash == blockhashes_chain.pop(0)
                 self.chainservice.add_block(t_block, proto)  # this blocks if the queue is full
+            log.debug('adding blocks done', took=time.time() - ts)
 
         # done
         last_block = t_block
@@ -162,7 +167,7 @@ class SyncTask(object):
         log.debug('syncing finished')
         # at this point blocks are not in the chain yet, but in the add_block queue
         if self.chain_difficulty >= self.chain.head.chain_difficulty():
-            self.chainservice.broadcast_new_head(last_block, self.chain_difficulty, origin=proto)
+            self.chainservice.broadcast_newblock(last_block, self.chain_difficulty, origin=proto)
 
         self.exit(success=True)
 
@@ -179,6 +184,9 @@ class SyncTask(object):
             log.debug('unexpected blockashes')
             return
         self.requests[proto].set(blockhashes)
+
+
+log = get_logger('eth.sync')
 
 
 class Synchronizer(object):
@@ -250,12 +258,17 @@ class Synchronizer(object):
         # memorize proto with difficulty
         self._protocols[proto] = chain_difficulty
 
+        expected_difficulty = self.chain.head.chain_difficulty() + t_block.header.difficulty
         if chain_difficulty >= self.chain.head.chain_difficulty():
-            log.debug('sufficient difficulty, broadcasting')
+            # FIXME, just broadcast once!!!
+
+            log.debug('sufficient difficulty, broadcasting',
+                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
             self.chainservice.broadcast_newblock(t_block, chain_difficulty, origin=proto)
         else:
             # any criteria for which blocks/chains not to add?
-            log.debug('insufficient difficulty, dropping')
+            log.debug('insufficient difficulty, dropping',
+                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
             return
 
         # unknown and pow check and highest difficulty
@@ -267,7 +280,6 @@ class Synchronizer(object):
         else:
             log.debug('missing parent')
             if not self.synctask:
-                assert chain_difficulty == max(self.protocols.values())
                 self.synctask = SyncTask(self, proto, t_block.header.hash, chain_difficulty)
             else:
                 log.debug('existing task, discarding')

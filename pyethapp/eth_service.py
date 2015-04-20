@@ -77,7 +77,9 @@ class ChainService(WiredService):
         try:
             while not self.block_queue.empty():
                 t_block, proto = self.block_queue.get()
-                assert t_block.header.hash not in self.chain
+                if t_block.header.hash in self.chain:
+                    log.warn('known block', block=t_block)
+                    continue
                 if t_block.header.prevhash not in self.chain:
                     log.warn('missing parent', block=t_block)
                     continue
@@ -106,8 +108,8 @@ class ChainService(WiredService):
         # eth_protocol needs to support
         log.warn('broadcasting newblock', origin=origin)
         bcast = self.app.services.peermanager.broadcast
-        bcast(eth_protocol.ETHProtocol, 'newblock', exclude_protos=[origin],
-              kargs=dict(block=block, chain_difficulty=chain_difficulty))
+        bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
+              num_peers=None, exclude_protos=[origin])
 
     # wire protocol receivers ###########
 
@@ -174,14 +176,14 @@ class ChainService(WiredService):
         found = []
         if child_block_hash not in self.chain:
             log.debug("unknown block")
-            proto.send_blockhashes([])
+            proto.send_blockhashes(*[])
+            return
+
         last = self.chain.get(child_block_hash)
-        while len(found) < max_hashes:
-            if last.has_parent():
-                last = last.get_parent()
-                found.append(last.hash)
-            else:
-                break
+        while len(found) < max_hashes and last.has_parent():
+            last = last.get_parent()
+            found.append(last.hash)
+
         log.debug("sending: found block_hashes", count=len(found))
         proto.send_blockhashes(*found)
 
