@@ -260,8 +260,7 @@ class Synchronizer(object):
 
         expected_difficulty = self.chain.head.chain_difficulty() + t_block.header.difficulty
         if chain_difficulty >= self.chain.head.chain_difficulty():
-            # FIXME, just broadcast once!!!
-
+            # broadcast duplicates filtering is done in eth_service
             log.debug('sufficient difficulty, broadcasting',
                       client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
             self.chainservice.broadcast_newblock(t_block, chain_difficulty, origin=proto)

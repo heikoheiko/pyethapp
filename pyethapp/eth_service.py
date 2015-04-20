@@ -28,6 +28,23 @@ processblock.apply_transaction = apply_transaction
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
 
 
+class DuplicatesFilter(object):
+
+    def __init__(self, max_items=128):
+        self.max_items = max_items
+        self.filter = list()
+
+    def known(self, data):
+        if data not in self.filter:
+            self.filter.append(data)
+            if len(self.filter) > self.max_items:
+                self.filter.pop(0)
+            return False
+        else:
+            self.filter.append(self.filter.pop(0))
+            return True
+
+
 class ChainService(WiredService):
 
     """
@@ -61,6 +78,7 @@ class ChainService(WiredService):
         self.block_queue = Queue(maxsize=self.block_queue_size)
         self.transaction_queue = Queue(maxsize=self.transaction_queue_size)
         self.add_blocks_lock = False
+        self.broadcast_filter = DuplicatesFilter()
 
     def _on_new_head(self, block):
         pass
@@ -105,11 +123,14 @@ class ChainService(WiredService):
             self.add_blocks_lock = False
 
     def broadcast_newblock(self, block, chain_difficulty, origin=None):
-        # eth_protocol needs to support
-        log.warn('broadcasting newblock', origin=origin)
-        bcast = self.app.services.peermanager.broadcast
-        bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
-              num_peers=None, exclude_protos=[origin])
+        assert isinstance(block, eth_protocol.TransientBlock)
+        if self.broadcast_filter.known(block.header.hash):
+            log.debug('already broadcasted block')
+        else:
+            log.debug('broadcasting newblock', origin=origin)
+            bcast = self.app.services.peermanager.broadcast
+            bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
+                  num_peers=None, exclude_protos=[origin])
 
     # wire protocol receivers ###########
 
