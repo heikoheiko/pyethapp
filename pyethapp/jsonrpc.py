@@ -1,7 +1,8 @@
 from decorator import decorator
 from collections import Iterable
 import inspect
-from ethereum.utils import is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3, zpad
+from ethereum.utils import (is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3,
+                            zpad)
 import ethereum.slogging as slogging
 from ethereum.transactions import Transaction
 from ethereum import processblock
@@ -608,10 +609,13 @@ class Chain(Subdispatcher):
 
     @public
     @decode_arg('block_id', block_id_decoder)
-    @encode_res(quantity_encoder)
-    def getBlockTransactionCountByNumber(self, block_id=None):
-        block = self.json_rpc_server.get_block(block_id)
-        return block.transaction_count
+    def getBlockTransactionCountByNumber(self, block_id):
+        try:
+            block = self.json_rpc_server.get_block(block_id)
+        except KeyError:
+            return None
+        else:
+            return quantity_encoder(block.transaction_count)
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
