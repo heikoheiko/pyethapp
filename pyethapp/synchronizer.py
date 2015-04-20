@@ -251,7 +251,7 @@ class Synchronizer(object):
             return
 
         # check pow
-        if not t_block.header.check_pow(db='FIXME'):
+        if not t_block.header.check_pow():
             log.warn('check pow failed, should ban!')
             return
 

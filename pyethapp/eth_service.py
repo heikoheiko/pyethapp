@@ -83,7 +83,7 @@ class ChainService(WiredService):
                 if t_block.header.prevhash not in self.chain:
                     log.warn('missing parent', block=t_block)
                     continue
-                if not t_block.header.check_pow(db='FIXME'):
+                if not t_block.header.check_pow():
                     log.warn('invalid pow', block=t_block)
                     # FIXME ban node
                     continue
