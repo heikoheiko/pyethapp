@@ -245,8 +245,6 @@ def data_decoder(data):
     if len(data) % 2 != 0:
         success = False  # must be even length
     else:
-        if len(data) % 2 != 0:  # TODO: remove
-            data += '0'         # TODO: remove
         try:
             return decode_hex(data[2:])
         except TypeError:
@@ -903,8 +901,10 @@ class FilterManager(Subdispatcher):
         if not required_keys.issubset(set(filter_dict.keys())):
             raise BadRequestError('Invalid filter object')
 
-        b0 = self.json_rpc_server.get_block(filter_dict['fromBlock'])
-        b1 = self.json_rpc_server.get_block(filter_dict['toBlock'])
+        b0 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['fromBlock']))
+        b1 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['toBlock']))
+        if b1.number < b0.number:
+            raise BadRequestError('fromBlock must be prior or equal to toBlock')
         address = filter_dict.get('address', None)
         if is_string(address):
             addresses = [address_decoder(address)]
@@ -916,10 +916,10 @@ class FilterManager(Subdispatcher):
             raise JSONRPCInvalidParamsError('Parameter must be address or list of addresses')
         topics = [data_decoder(topic) for topic in filter_dict.get('topics', [])]
 
-        blocks = [b0]
+        blocks = [b1]
         while blocks[-1] != b1:
             blocks.append(blocks[-1].get_parent())
-        filter_ = Filter(self.chain.chain, blocks, addresses, topics)
+        filter_ = Filter(self.chain.chain, reversed(blocks), addresses, topics)
         self.filters[self.next_id] = filter_
         self.next_id += 1
         return self.next_id - 1
