@@ -192,7 +192,8 @@ class ChainService(WiredService):
 
     def on_receive_blockhashes(self, proto, blockhashes):
         if blockhashes:
-            log.debug("on_receive_blockhashes", count=len(blockhashes), remote_id=proto)
+            log.debug("on_receive_blockhashes", count=len(blockhashes), remote_id=proto,
+                      first=encode_hex(blockhashes[0]), last=encode_hex(blockhashes[-1]))
         else:
             log.debug("recv 0 remote block hashes, signifying genesis block")
         self.synchronizer.receive_blockhashes(proto, blockhashes)

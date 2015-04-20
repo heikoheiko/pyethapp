@@ -650,7 +650,7 @@ class Chain(Subdispatcher):
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByHash(self, block_hash, include_transactions):
         try:
-            block = self.json_rpc_server.get_block(block_hash)
+            block = self.json_rpc_server.get_block(None, block_hash)
         except KeyError:
             return None
         return block_encoder(block, include_transactions)
@@ -660,7 +660,7 @@ class Chain(Subdispatcher):
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByNumber(self, block_id, include_transactions):
         try:
-            block = self.json_rpc_server.get_block(block_id)
+            block = self.json_rpc_server.get_block(None, block_id)
         except KeyError:
             return None
         return block_encoder(block, include_transactions)
