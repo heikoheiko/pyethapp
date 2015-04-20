@@ -12,6 +12,7 @@ from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 from devp2p.app import BaseApp
 from eth_service import ChainService
+from console_service import Console
 from ethereum.blocks import Block
 import ethereum.slogging as slogging
 import config as konfig
@@ -24,7 +25,7 @@ slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
 
 
-services = [DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer]
+services = [DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer, Console]
 services += utils.load_contrib_services()
 
 

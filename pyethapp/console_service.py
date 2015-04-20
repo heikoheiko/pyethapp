@@ -1,17 +1,15 @@
 """
 Essential parts borrowed from https://github.com/ipython/ipython/pull/1654
 """
-
-import code
 import signal
 from devp2p.service import BaseService
 import gevent
 from gevent.event import Event
 import IPython
 import IPython.core.shellapp
-from IPython.lib.inputhook import InputHookBase, inputhook_manager, GlutInputHook, stdin_ready
-
-
+from IPython.lib.inputhook import inputhook_manager, stdin_ready
+from ethereum import slogging
+import sys
 GUI_GEVENT = 'gevent'
 
 
@@ -22,7 +20,10 @@ def inputhook_gevent():
 
 
 @inputhook_manager.register('gevent')
-class GeventInputHook(InputHookBase):
+class GeventInputHook(object):
+
+    def __init__(self, manager):
+        self.manager = manager
 
     def enable(self, app=None):
         """Enable event loop integration with gevent.
@@ -73,8 +74,22 @@ class Console(BaseService):
         self.console_locals.update(self.app.services)
         self.console_locals['app'] = self.app
 
+        def stop_app():
+            try:
+                self.app.stop()
+            except gevent.GreenletExit:
+                pass
+        self.console_locals['stop'] = stop_app
+
     def _run(self):
-        while True:
-            self.interrupt.wait()
-            IPython.start_ipython(argv=['--gui', 'gevent'], user_ns=self.console_locals)
-            self.interrupt.clear()
+        # looping did not work
+        self.interrupt.wait()
+
+        print '\n' * 3
+        print "Entering Console, stopping services"
+        for s in self.app.services.values():
+            if s != self:
+                s.stop()
+        IPython.start_ipython(argv=['--gui', 'gevent'], user_ns=self.console_locals)
+        self.interrupt.clear()
+        sys.exit(0)
