@@ -125,7 +125,7 @@ class ETHProtocol(BaseProtocol):
 
         @classmethod
         def encode_payload(cls, list_of_rlp):
-            return rlp.encode([rlp.codec.RawRLP(x) for x in list_of_rlp], infer_serializer=False)
+            return rlp.encode([rlp.codec.RLPData(x) for x in list_of_rlp], infer_serializer=False)
 
         @classmethod
         def decode_payload(cls, rlp_data):
