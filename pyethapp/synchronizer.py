@@ -1,7 +1,7 @@
 from gevent.event import AsyncResult
 import gevent
 from ethereum.slogging import get_logger
-log = get_logger('eth.synctask')
+log = get_logger('eth.sync.task')
 
 
 class SyncTask(object):
@@ -70,7 +70,6 @@ class SyncTask(object):
             proto = self.initiator_proto
             # request
             assert proto not in self.requests
-            assert not proto.is_stopped
             deferred = AsyncResult()
             self.requests[proto] = deferred
             proto.send_getblockhashes(blockhash, max_blockhashes_per_request)
@@ -245,7 +244,8 @@ class Synchronizer(object):
 
     def receive_newblock(self, proto, t_block, chain_difficulty):
         "called if there's a newblock announced on the network"
-        log.debug('newblock', proto=proto, block=t_block)
+        log.debug('newblock', proto=proto, block=t_block, chain_difficulty=chain_difficulty)
+        assert chain_difficulty != 0
         if t_block.header.hash in self.chain:
             log.debug('known block')
             return
@@ -268,7 +268,7 @@ class Synchronizer(object):
             # any criteria for which blocks/chains not to add?
             log.debug('insufficient difficulty, dropping',
                       client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
-            return
+# return  # FIXME
 
         # unknown and pow check and highest difficulty
 
@@ -286,6 +286,10 @@ class Synchronizer(object):
     def receive_status(self, proto, blockhash, chain_difficulty):
         "called if a new peer is connected"
         log.debug('status received', proto=proto, chain_difficulty=chain_difficulty)
+
+        # memorize proto with difficulty
+        self._protocols[proto] = chain_difficulty
+
         if self.force_sync and not self.synctask:
             blockhash, chain_difficulty = self.force_sync
             log.debug('starting forced syctask', blockhash=blockhash.encode('hex'))
