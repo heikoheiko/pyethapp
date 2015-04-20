@@ -179,18 +179,20 @@ class ChainService(WiredService):
             proto.send_blockhashes(*[])
             return
 
-        last = self.chain.get(child_block_hash)
-        while len(found) < max_hashes and last.has_parent():
-            last = last.get_parent()
-            found.append(last.hash)
+        last = child_block_hash
+        while len(found) < max_hashes:
+            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            if last:
+                found.append(last)
+            else:
+                break
 
         log.debug("sending: found block_hashes", count=len(found))
         proto.send_blockhashes(*found)
 
     def on_receive_blockhashes(self, proto, blockhashes):
         if blockhashes:
-            log.debug("on_receive_blockhashes", count=len(blockhashes), remote_id=proto,
-                      first=encode_hex(blockhashes[0]), last=encode_hex(blockhashes[-1]))
+            log.debug("on_receive_blockhashes", count=len(blockhashes), remote_id=proto)
         else:
             log.debug("recv 0 remote block hashes, signifying genesis block")
         self.synchronizer.receive_blockhashes(proto, blockhashes)
@@ -201,12 +203,12 @@ class ChainService(WiredService):
         log.debug("on_receive_getblocks", count=len(blockhashes))
         found = []
         for bh in blockhashes[:self.wire_protocol.max_getblocks_count]:
-            if bh in self.chain:
-                found.append(self.chain.get(bh))
-            else:
+            try:
+                found.append(self.chain.db.get(bh))
+            except KeyError:
                 log.debug("unknown block requested", block_hash=encode_hex(bh))
         if found:
-            log.debug("found", count=len(found), first=found[0].hex_hash())
+            log.debug("found", count=len(found))
             proto.send_blocks(*found)
 
     def on_receive_blocks(self, proto, transient_blocks):

@@ -124,6 +124,10 @@ class ETHProtocol(BaseProtocol):
         structure = rlp.sedes.CountableList(Block)
 
         @classmethod
+        def encode_payload(cls, list_of_rlp):
+            return rlp.encode([rlp.codec.RawRLP(x) for x in list_of_rlp], infer_serializer=False)
+
+        @classmethod
         def decode_payload(cls, rlp_data):
             # fn = 'blocks.fromthewire.hex.rlp'
             # open(fn, 'a').write(rlp_data.encode('hex') + '\n')
