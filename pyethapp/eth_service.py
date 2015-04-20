@@ -73,7 +73,7 @@ class ChainService(WiredService):
             gevent.spawn(self._add_blocks)
 
     def _add_blocks(self):
-        log.warn('_add_blocks', qsize=self.block_queue.qsize())
+        log.debug('add_blocks', qsize=self.block_queue.qsize())
         try:
             while not self.block_queue.empty():
                 t_block, proto = self.block_queue.get()
