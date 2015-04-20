@@ -631,14 +631,15 @@ class Chain(Subdispatcher):
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByHash(self, block_hash, include_transactions):
-        block = self.json_rpc_server.get_block(block_hash)
+        block = self.json_rpc_server.get_block(None, block_hash)
         return block_encoder(block, include_transactions)
 
     @public
     @decode_arg('block_id', block_id_decoder)
     @decode_arg('include_transactions', bool_decoder)
     def getBlockByNumber(self, block_id, include_transactions):
-        block = self.json_rpc_server.get_block(block_id)
+        print block_id
+        block = self.json_rpc_server.get_block(None, block_id)
         return block_encoder(block, include_transactions)
 
     @public
