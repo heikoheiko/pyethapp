@@ -1,6 +1,8 @@
+from copy import deepcopy
 from decorator import decorator
 from collections import Iterable
 import inspect
+import ethereum.blocks
 from ethereum.utils import (is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3,
                             zpad)
 import ethereum.slogging as slogging
@@ -765,15 +767,24 @@ class Chain(Subdispatcher):
 
     @public
     @decode_arg('block_id', block_id_decoder)
+    @encode_res(data_encoder)
     def call(self, data, block_id=None):
         block = self.json_rpc_server.get_block(block_id)
+        state_root_before = block.state_root
+
         # rebuild block state before finalization
-        parent = block.get_parent()
-        test_block = block.init_from_parent(parent, block.coinbase,
-                                            timestamp=block.timestamp)
-        for tx in block.get_transactions():
-            success, output = processblock.apply_transaction(test_block, tx)
-            assert success
+        if block.has_parent():
+            parent = block.get_parent()
+            test_block = block.init_from_parent(parent, block.coinbase,
+                                                timestamp=block.timestamp)
+            for tx in block.get_transactions():
+                success, output = processblock.apply_transaction(test_block, tx)
+                assert success
+        else:
+            original = block.snapshot()
+            original['journal'] = deepcopy(original['journal'])  # do not alter original journal
+            test_block = ethereum.blocks.genesis(block.db)
+            test_block.revert(original)
 
         # validate transaction
         if not isinstance(data, dict):
@@ -799,15 +810,15 @@ class Chain(Subdispatcher):
             sender = address_decoder(data['from'])
         except KeyError:
             sender = '\x00' * 20
-        # initialize transaction
-        nonce = block.get_nonce(sender)
+        # apply transaction
+        nonce = test_block.get_nonce(sender)
         tx = Transaction(nonce, gasprice, startgas, to, value, data_)
         tx.sender = sender
-        # apply transaction
         try:
             success, output = processblock.apply_transaction(test_block, tx)
         except processblock.InvalidTransaction:
             success = False
+        assert block.state_root == state_root_before
         if success:
             return output
         else:
