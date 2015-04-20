@@ -1,159 +1,314 @@
-
-from rlp.utils import encode_hex
+from gevent.event import AsyncResult
+import gevent
 from ethereum.slogging import get_logger
+log = get_logger('eth.synctask')
+
+
+class SyncTask(object):
+
+    """
+    synchronizes a the chain starting from a given blockhash
+    blockchain hash is fetched from a single peer (which led to the unknown blockhash)
+    blocks are fetched from the best peers
+
+    with missing block:
+        fetch hashes
+            until known block
+    for hashes
+        fetch blocks
+            for each block
+                chainservice.add_blocks() # blocks if queue is full
+    """
+    max_blocks_per_request = 256
+    initial_blockhashes_per_request = 16
+    max_blockhashes_per_request = 2048
+    blocks_request_timeout = 8.  # 256 * ~2KB = 512KB
+    blockhashes_request_timeout = 8.  # 32 * 2048 = 65KB
+
+    def __init__(self, synchronizer, proto, blockhash, chain_difficulty):
+        self.synchronizer = synchronizer
+        self.chain = synchronizer.chain
+        self.chainservice = synchronizer.chainservice
+        self.initiator_proto = proto
+        self.blockhash = blockhash
+        self.chain_difficulty = chain_difficulty
+        self.requests = dict()  # proto: Event
+        gevent.spawn(self.run)
+
+    def run(self):
+        log.info('spawning new syntask')
+        try:
+            self.fetch_hashchain()
+        except Exception as e:
+            self.exit(success=False)
+            raise e
+
+    def run(self):
+        log.info('spawning new syntask')
+        self.fetch_hashchain()
+
+    def exit(self, success=False):
+        if not success:
+            log.warn('syncing failed')
+        else:
+            log.debug('sucessfully synced')
+        self.synchronizer.synctask_exited(success)
+
+    def fetch_hashchain(self):
+        log.debug('fetching hashchain')
+        blockhashes_chain = [self.blockhash]  # youngest to oldest
+
+        blockhash = self.blockhash
+        assert blockhash not in self.chain
+
+        # get block hashes until we found a known one
+        max_blockhashes_per_request = self.initial_blockhashes_per_request
+        while blockhash not in self.chain:
+            # proto with highest_difficulty should be the proto we got the newblock from
+            blockhashes_batch = []
+
+            proto = self.initiator_proto
+            # request
+            assert proto not in self.requests
+            assert not proto.is_stopped
+            deferred = AsyncResult()
+            self.requests[proto] = deferred
+            proto.send_getblockhashes(blockhash, max_blockhashes_per_request)
+            try:
+                blockhashes_batch = deferred.get(block=True,
+                                                 timeout=self.blockhashes_request_timeout)
+            except gevent.Timeout:
+                log.warn('syncing timed out')
+                return self.exit(success=False)
+            finally:
+                # is also executed 'on the way out' when any other clause of the try statement
+                # is left via a break, continue or return statement.
+                del self.requests[proto]
+
+            if not blockhashes_batch:
+                log.warn('empty getblockhashes result')
+                return self.exit(success=False)
+
+            for blockhash in blockhashes_batch:  # youngest to oldest
+                assert isinstance(blockhash, str)
+                if blockhash not in self.chain:
+                    blockhashes_chain.append(blockhash)
+                else:
+                    log.debug('found known blockhash', blockhash=blockhash.encode('hex'),
+                              is_genesis=bool(blockhash == self.chain.genesis.hash))
+                    break
+            max_blockhashes_per_request = self.max_blockhashes_per_request
+
+        self.fetch_blocks(blockhashes_chain)
+
+    def fetch_blocks(self, blockhashes_chain):
+        # fetch blocks (no parallelism here)
+        log.debug('fetching blocks', num=len(blockhashes_chain))
+        assert blockhashes_chain
+        blockhashes_chain.reverse()  # oldest to youngest
+        num_blocks = len(blockhashes_chain)
+        num_fetched = 0
+
+        while blockhashes_chain:
+            blockhashes_batch = blockhashes_chain[:self.max_blocks_per_request]
+            t_blocks = []
+
+            # try with protos
+            protocols = self.synchronizer.protocols
+            if not protocols:
+                log.warn('no protocols available')
+                return self.exit(success=False)
+
+            for proto in protocols:
+                assert proto not in self.requests
+                assert not proto.is_stopped
+                # request
+                log.debug('requesting blocks', num=len(blockhashes_batch))
+                deferred = AsyncResult()
+                self.requests[proto] = deferred
+                proto.send_getblocks(*blockhashes_batch)
+                try:
+                    t_blocks = deferred.get(block=True, timeout=self.blocks_request_timeout)
+                except gevent.Timeout:
+                    log.warn('getblocks timed out, trying next proto')
+                    continue
+                finally:
+                    del self.requests[proto]
+                if not t_blocks:
+                    log.warn('empty getblocks reply, trying next proto')
+                    continue
+                # we have results
+                if not [b.header.hash for b in t_blocks] == blockhashes_batch[:len(t_blocks)]:
+                    log.warn('received wrong blocks, should ban peer')
+                    continue
+                break
+
+            # add received t_blocks
+            num_fetched += len(t_blocks)
+            log.debug('received blocks', num=len(t_blocks), num_fetched=num_fetched,
+                      total=num_blocks, missing=num_blocks - num_fetched)
+
+            if not t_blocks:
+                log.warn('failed to fetch blocks', missing=len(blockhashes_chain))
+                return self.exit(success=False)
+
+            import time
+            ts = time.time()
+            log.debug('adding blocks', qsize=self.chainservice.block_queue.qsize())
+            for t_block in t_blocks:
+                assert t_block.header.hash == blockhashes_chain.pop(0)
+                self.chainservice.add_block(t_block, proto)  # this blocks if the queue is full
+            log.debug('adding blocks done', took=time.time() - ts)
+
+        # done
+        last_block = t_block
+        assert not len(blockhashes_chain)
+        assert last_block.header.hash == self.blockhash
+        log.debug('syncing finished')
+        # at this point blocks are not in the chain yet, but in the add_block queue
+        if self.chain_difficulty >= self.chain.head.chain_difficulty():
+            self.chainservice.broadcast_newblock(last_block, self.chain_difficulty, origin=proto)
+
+        self.exit(success=True)
+
+    def receive_blocks(self, proto, t_blocks):
+        log.debug('blocks received', proto=proto, num=len(t_blocks))
+        if proto not in self.requests:
+            log.debug('unexpected blocks')
+            return
+        self.requests[proto].set(t_blocks)
+
+    def receive_blockhashes(self, proto, blockhashes):
+        log.debug('blockhashes received', proto=proto, num=len(blockhashes))
+        if proto not in self.requests:
+            log.debug('unexpected blockashes')
+            return
+        self.requests[proto].set(blockhashes)
+
+
 log = get_logger('eth.sync')
-
-
-class HashChainTask(object):
-
-    """
-    - get hashes chain until we see a known block hash
-    """
-
-    NUM_HASHES_PER_REQUEST = 2000
-
-    def __init__(self, chain_manager, peer, block_hash):
-        self.chain_manager = chain_manager
-        self.peer = peer
-        self.hash_chain = []  # [youngest, ..., oldest]
-        self.request(block_hash)
-
-    def request(self, block_hash):
-        log.debug('requesting block_hashes', peer=self.peer, start=encode_hex(block_hash))
-        self.peer.send_GetBlockHashes(block_hash, self.NUM_HASHES_PER_REQUEST)
-
-    def received_block_hashes(self, block_hashes):
-        log.debug('HashChainTask.received_block_hashes', num=len(block_hashes))
-        if block_hashes and self.chain_manager.genesis.hash == block_hashes[-1]:
-            log.debug('has different chain starting from genesis', peer=self.peer)
-        for bh in block_hashes:
-            if bh in self.chain_manager or bh == self.chain_manager.genesis.hash:
-                log.debug('matching block hash found', peer=self.peer,
-                          hash=encode_hex(bh), num_to_fetch=len(self.hash_chain))
-                return list(reversed(self.hash_chain))
-            self.hash_chain.append(bh)
-        if len(block_hashes) == 0:
-            return list(reversed(self.hash_chain))
-        self.request(bh)
-
-
-class SynchronizationTask(object):
-
-    """
-    Created if we receive a unknown block w/o known parent. Possibly from a different branch.
-
-    - get hashes chain until we see a known block hash
-    - request missing blocks
-
-    - once synced
-        - rerequest blocks that lacked a reference before syncing
-    """
-    NUM_BLOCKS_PER_REQUEST = 200
-
-    def __init__(self, chain_manager, peer, block_hash):
-        self.chain_manager = chain_manager
-        self.peer = peer
-        self.hash_chain = []  # [oldest to youngest]
-        log.debug('syncing', peer=self.peer, hash=encode_hex(block_hash))
-        self.hash_chain_task = HashChainTask(self.chain_manager, self.peer, block_hash)
-
-    def received_block_hashes(self, block_hashes):
-        res = self.hash_chain_task.received_block_hashes(block_hashes)
-        if res:
-            self.hash_chain = res
-            log.debug('receieved hash chain', peer=self.peer, num=len(self.hash_chain))
-            self.request_blocks()
-
-    def received_blocks(self, transient_blocks):
-        log.debug('blocks received', peer=self.peer, num=len(
-            transient_blocks), missing=len(self.hash_chain))
-        for tb in transient_blocks:
-            if len(self.hash_chain) and self.hash_chain[0] == tb.hash:
-                self.hash_chain.pop(0)
-            else:
-                log.debug('received unexpected block', peer=self.peer, block=tb)
-                return False
-        if self.hash_chain:
-            # still blocks to fetch
-            log.debug('still missing blocks', peer=self.peer, num=len(self.hash_chain))
-            self.request_blocks()
-        else:  # done
-            return True
-
-    def request_blocks(self):
-        log.debug('requesting missing blocks', peer=self.peer,
-                  requested=self.NUM_BLOCKS_PER_REQUEST, missing=len(self.hash_chain))
-        self.peer.send_GetBlocks(self.hash_chain[:self.NUM_BLOCKS_PER_REQUEST])
 
 
 class Synchronizer(object):
 
-    """"
-    Cases:
-        on "recv_Status": received unknown head_hash w/ sufficient difficulty
-        on "recv_Blocks": received block w/o parent (new block mined, competing chain discovered)
+    """
+    handles the synchronization of blocks
 
-    Naive Strategy:
-        assert we see a block for which we have no parent
-        assume that the sending peer knows the parent
-        if we have not yet syncer for this unknown block:
-            create new syncer
-            sync direction genesis until we see known block_hash
-            sync also (re)requests the block we missed, so it can be added on top of the synced chain
-        else
-            do nothing
-            syncing (if finished) will be started with the next broadcasted block w/ missing parent
+    there is only one synctask active at a time
+    in order to deal with the worst case of initially syncing the wrong chain,
+        a checkpoint blockhash can be specified and synced via force_sync
+
+    received blocks are given to chainservice.add_block
+    which has a fixed size queue, the synchronization blocks if the queue is full
+
+    on_status:
+        if peer.head.chain_difficulty > chain.head.chain_difficulty
+            fetch peer.head and handle as newblock
+    on_newblock:
+        if block.parent:
+            add
+        else:
+            sync
+    on_blocks/on_blockhashes:
+        if synctask:
+            handle to requester
+        elif unknown and has parent:
+            add to chain
+        else:
+            drop
     """
 
-    def __init__(self, chain_manager):
-        self.chain_manager = chain_manager
-        self.synchronization_tasks = {}  # peer > syncer # syncer.unknown_hash as marker for task
+    def __init__(self, chainservice, force_sync=None):
+        """
+        @param: force_sync None or tuple(blockhash, chain_difficulty)
+                helper for long initial syncs to get on the right chain
+                used with first status_received
+        """
+        self.chainservice = chainservice
+        self.force_sync = force_sync
+        self.chain = chainservice.chain
+        self._protocols = dict()  # proto: chain_difficulty
+        self.synctask = None
 
-    def stop_synchronization(self, peer):
-        log.debug('sync stopped', peer=peer)
-        if peer in self.synchronization_tasks:
-            del self.synchronization_tasks[peer]
+    def synctask_exited(self, success=False):
+        # note: synctask broadcasts best block
+        if success:
+            self.force_sync = None
+        self.synctask = None
 
-    def synchronize_unknown_block(self, peer, block_hash, force=False):
-        "Case: block with unknown parent. Fetches unknown ancestors and this block"
-        log.debug('sync unknown', peer=peer, block=encode_hex(block_hash))
-        if block_hash == self.chain_manager.genesis.hash or block_hash in self.chain_manager:
-            log.debug('known_hash, skipping', peer=peer, hash=encode_hex(block_hash))
+    @property
+    def protocols(self):
+        "return protocols which are not stopped sorted by highest chain_difficulty"
+        # filter and cleanup
+        self._protocols = dict((p, cd) for p, cd in self._protocols.items() if not p.is_stopped)
+        return sorted(self._protocols.keys(), key=lambda p: self._protocols[p], reverse=True)
+
+    def receive_newblock(self, proto, t_block, chain_difficulty):
+        "called if there's a newblock announced on the network"
+        log.debug('newblock', proto=proto, block=t_block)
+        if t_block.header.hash in self.chain:
+            log.debug('known block')
             return
 
-        if peer and (not peer in self.synchronization_tasks) or force:
-            log.debug('new sync task', peer=peer)
-            self.synchronization_tasks[peer] = SynchronizationTask(
-                self.chain_manager, peer, block_hash)
+        # check pow
+        if not t_block.header.check_pow(db='FIXME'):
+            log.warn('check pow failed, should ban!')
+            return
+
+        # memorize proto with difficulty
+        self._protocols[proto] = chain_difficulty
+
+        expected_difficulty = self.chain.head.chain_difficulty() + t_block.header.difficulty
+        if chain_difficulty >= self.chain.head.chain_difficulty():
+            # FIXME, just broadcast once!!!
+
+            log.debug('sufficient difficulty, broadcasting',
+                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
+            self.chainservice.broadcast_newblock(t_block, chain_difficulty, origin=proto)
         else:
-            log.debug('existing synctask', peer=peer)
+            # any criteria for which blocks/chains not to add?
+            log.debug('insufficient difficulty, dropping',
+                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
+            return
 
-    def synchronize_status(self, peer, block_hash, total_difficulty):
-        "Case: unknown head with sufficient difficulty"
-        log.debug('sync status', peer=peer,  hash=block_hash.encode(
-            'hex'), total_difficulty=total_difficulty)
+        # unknown and pow check and highest difficulty
 
-        # guesstimate the max difficulty difference possible for a sucessfully competing chain
-        # worst case if skip it: we are on a stale chain until the other catched up
-        # assume difficulty is constant
-        num_blocks_behind = 7
-        avg_uncles_per_block = 4
-        max_diff = self.chain_manager.head.difficulty * \
-            num_blocks_behind * (1 + avg_uncles_per_block)
-        if total_difficulty + max_diff > self.chain_manager.head.difficulty:
-            log.debug('sufficient difficulty, syncing', peer=peer)
-            self.synchronize_unknown_block(peer, block_hash)
+        # check if we have parent
+        if t_block.header.prevhash in self.chain:
+            log.debug('adding block')
+            self.chainservice.add_block(t_block, proto)
         else:
-            log.debug('insufficient difficulty, not syncing', peer=peer)
+            log.debug('missing parent')
+            if not self.synctask:
+                self.synctask = SyncTask(self, proto, t_block.header.hash, chain_difficulty)
+            else:
+                log.debug('existing task, discarding')
 
-    def received_block_hashes(self, peer, block_hashes):
-        if peer in self.synchronization_tasks:
-            log.debug("Synchronizer.received_block_hashes", peer=peer, num=len(block_hashes))
-            self.synchronization_tasks[peer].received_block_hashes(block_hashes)
+    def receive_status(self, proto, blockhash, chain_difficulty):
+        "called if a new peer is connected"
+        log.debug('status received', proto=proto, chain_difficulty=chain_difficulty)
+        if self.force_sync and not self.synctask:
+            blockhash, chain_difficulty = self.force_sync
+            log.debug('starting forced syctask', blockhash=blockhash.encode('hex'))
+            self.synctask = SyncTask(self, proto, blockhash, chain_difficulty)
 
-    def received_blocks(self, peer, transient_blocks):
-        if peer in self.synchronization_tasks:
-            res = self.synchronization_tasks[peer].received_blocks(transient_blocks)
-            if res is True:
-                log.debug("Synchronizer.received_blocks: chain synced", peer=peer)
-                del self.synchronization_tasks[peer]
+        elif chain_difficulty > self.chain.head.chain_difficulty():
+            log.debug('sufficient difficulty')
+            if not self.synctask:
+                self.synctask = SyncTask(self, proto, blockhash, chain_difficulty)
+            else:
+                log.debug('existing task, discarding')
+
+    def receive_blocks(self, proto, t_blocks):
+        log.debug('blocks received', proto=proto, num=len(t_blocks))
+        if self.synctask:
+            self.synctask.receive_blocks(proto, t_blocks)
+        else:
+            log.warn('no synctask, not expecting blocks')
+
+    def receive_blockhashes(self, proto, blockhashes):
+        log.debug('blockhashes received', proto=proto, num=len(blockhashes))
+        if self.synctask:
+            self.synctask.receive_blockhashes(proto, blockhashes)
+        else:
+            log.warn('no synctask, not expecting blockhashes')

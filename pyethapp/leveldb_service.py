@@ -10,30 +10,12 @@ log = slogging.get_logger('db')
 compress = decompress = lambda x: x
 
 
-class LevelDB(BaseService):
+class LevelDB(object):
 
-    """A service providing an interface to a level db."""
-
-    name = 'db'
-    default_config = dict(data_dir='')
-
-    def __init__(self, app):
-        super(LevelDB, self).__init__(app)
-        assert self.app.config['data_dir']
-        self.dbfile = os.path.join(self.app.config['data_dir'], 'leveldb')
-        self.db = None
+    def __init__(self, dbfile):
         self.uncommitted = dict()
-        self.stop_event = Event()
-        log.info('opening LevelDB', path=self.dbfile)
-        self.db = leveldb.LevelDB(self.dbfile)
-
-    def _run(self):
-        self.stop_event.wait()
-
-    def stop(self):
-        self.stop_event.set()
-        # commit?
-        log.info('closing db')
+        log.info('opening LevelDB', path=dbfile)
+        self.db = leveldb.LevelDB(dbfile)
 
     def get(self, key):
         log.trace('getting entry', key=key.encode('hex')[:8])
@@ -81,3 +63,27 @@ class LevelDB(BaseService):
 
     def __repr__(self):
         return '<DB at %d uncommitted=%d>' % (id(self.db), len(self.uncommitted))
+
+
+class LevelDBService(LevelDB, BaseService):
+
+    """A service providing an interface to a level db."""
+
+    name = 'db'
+    default_config = dict(data_dir='')
+
+    def __init__(self, app):
+        BaseService.__init__(self, app)
+        assert self.app.config['data_dir']
+        self.uncommitted = dict()
+        self.stop_event = Event()
+        dbfile = os.path.join(self.app.config['data_dir'], 'leveldb')
+        LevelDB.__init__(self, dbfile)
+
+    def _run(self):
+        self.stop_event.wait()
+
+    def stop(self):
+        self.stop_event.set()
+        # commit?
+        log.info('closing db')
