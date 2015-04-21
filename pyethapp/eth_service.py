@@ -130,7 +130,7 @@ class ChainService(WiredService):
             log.debug('broadcasting newblock', origin=origin)
             bcast = self.app.services.peermanager.broadcast
             bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
-                  num_peers=None, exclude_protos=[origin])
+                  exclude_peers=[origin.peer])
 
     # wire protocol receivers ###########
 

@@ -1,5 +1,7 @@
 from gevent.event import AsyncResult
 import gevent
+import time
+from eth_protocol import TransientBlock
 from ethereum.slogging import get_logger
 log = get_logger('eth.sync.task')
 
@@ -67,26 +69,36 @@ class SyncTask(object):
             # proto with highest_difficulty should be the proto we got the newblock from
             blockhashes_batch = []
 
-            proto = self.initiator_proto
-            # request
-            assert proto not in self.requests
-            deferred = AsyncResult()
-            self.requests[proto] = deferred
-            proto.send_getblockhashes(blockhash, max_blockhashes_per_request)
-            try:
-                blockhashes_batch = deferred.get(block=True,
-                                                 timeout=self.blockhashes_request_timeout)
-            except gevent.Timeout:
-                log.warn('syncing timed out')
+            # try with protos
+            protocols = self.synchronizer.protocols
+            if not protocols:
+                log.warn('no protocols available')
                 return self.exit(success=False)
-            finally:
-                # is also executed 'on the way out' when any other clause of the try statement
-                # is left via a break, continue or return statement.
-                del self.requests[proto]
 
-            if not blockhashes_batch:
-                log.warn('empty getblockhashes result')
-                return self.exit(success=False)
+            for proto in protocols:
+                assert proto not in self.requests
+                assert not proto.is_stopped
+
+                # request
+                assert proto not in self.requests
+                deferred = AsyncResult()
+                self.requests[proto] = deferred
+                proto.send_getblockhashes(blockhash, max_blockhashes_per_request)
+                try:
+                    blockhashes_batch = deferred.get(block=True,
+                                                     timeout=self.blockhashes_request_timeout)
+                except gevent.Timeout:
+                    log.warn('syncing timed out')
+                    continue
+                finally:
+                    # is also executed 'on the way out' when any other clause of the try statement
+                    # is left via a break, continue or return statement.
+                    del self.requests[proto]
+
+                if not blockhashes_batch:
+                    log.warn('empty getblockhashes result')
+                    continue
+                break
 
             for blockhash in blockhashes_batch:  # youngest to oldest
                 assert isinstance(blockhash, str)
@@ -136,6 +148,8 @@ class SyncTask(object):
                 if not t_blocks:
                     log.warn('empty getblocks reply, trying next proto')
                     continue
+                else:
+                    assert isinstance(t_blocks[0], TransientBlock)
                 # we have results
                 if not [b.header.hash for b in t_blocks] == blockhashes_batch[:len(t_blocks)]:
                     log.warn('received wrong blocks, should ban peer')
@@ -151,7 +165,6 @@ class SyncTask(object):
                 log.warn('failed to fetch blocks', missing=len(blockhashes_chain))
                 return self.exit(success=False)
 
-            import time
             ts = time.time()
             log.debug('adding blocks', qsize=self.chainservice.block_queue.qsize())
             for t_block in t_blocks:
@@ -244,8 +257,9 @@ class Synchronizer(object):
 
     def receive_newblock(self, proto, t_block, chain_difficulty):
         "called if there's a newblock announced on the network"
-        log.debug('newblock', proto=proto, block=t_block, chain_difficulty=chain_difficulty)
-        assert chain_difficulty != 0
+        log.debug('newblock', proto=proto, block=t_block, chain_difficulty=chain_difficulty,
+                  client=proto.peer.remote_client_version)
+
         if t_block.header.hash in self.chain:
             log.debug('known block')
             return
@@ -262,13 +276,14 @@ class Synchronizer(object):
         if chain_difficulty >= self.chain.head.chain_difficulty():
             # broadcast duplicates filtering is done in eth_service
             log.debug('sufficient difficulty, broadcasting',
-                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
+                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty,
+                      expected_difficulty=expected_difficulty)
             self.chainservice.broadcast_newblock(t_block, chain_difficulty, origin=proto)
         else:
             # any criteria for which blocks/chains not to add?
-            log.debug('insufficient difficulty, dropping',
-                      client=proto.peer.remote_client_version, chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
-# return  # FIXME
+            log.debug('insufficient difficulty, dropping', client=proto.peer.remote_client_version,
+                      chain_difficulty=chain_difficulty, expected_difficulty=expected_difficulty)
+            return
 
         # unknown and pow check and highest difficulty
 
