@@ -45,7 +45,8 @@ RUN git clone https://github.com/ethereum/pyethapp && cd pyethapp && \
 RUN sed -i 's/PROTOCOL_SSLv3/PROTOCOL_SSLv23/g' /usr/local/lib/python2.7/site-packages/gevent/ssl.py
 
 # For docker builds from git, we add the last commit to the version string:
-RUN sed -i "s/client_version = 'pyethapp/client_version = 'pyethapp_$(git rev-parse HEAD| cut -c 1-6)/g" /usr/local/lib/python2.7/site-packages/pyethapp*/pyethapp/app.py
+RUN cd pyethapp &&\
+    sed -i "s/client_version = 'pyethapp/client_version = 'pyethapp_$(git rev-parse HEAD| cut -c 1-6)/g" /usr/local/lib/python2.7/site-packages/pyethapp*/pyethapp/app.py
 
 RUN adduser pyethuser
 
