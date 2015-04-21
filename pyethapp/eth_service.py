@@ -72,6 +72,7 @@ class ChainService(WiredService):
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
         self.chain = Chain(self.db, new_head_cb=self._on_new_head)
+        log.info('chain at', number=self.chain.head.number)
         self.synchronizer = Synchronizer(self, force_sync=None)
         self.chain.coinbase = privtoaddr(self.config['eth']['privkey_hex'].decode('hex'))
 
@@ -130,7 +131,7 @@ class ChainService(WiredService):
             log.debug('broadcasting newblock', origin=origin)
             bcast = self.app.services.peermanager.broadcast
             bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
-                  num_peers=None, exclude_protos=[origin])
+                  exclude_peers=[origin.peer])
 
     # wire protocol receivers ###########
 
