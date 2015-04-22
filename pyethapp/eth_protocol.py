@@ -23,7 +23,6 @@ class ETHProtocol(BaseProtocol):
     max_cmd_id = 15  # FIXME
     name = 'eth'
     version = 60
-    network_id = 0
 
     max_getblocks_count = 256
     max_getblockhashes_count = 2048
@@ -54,8 +53,8 @@ class ETHProtocol(BaseProtocol):
 
         def create(self, proto, chain_difficulty, chain_head_hash, genesis_hash):
             self.sent = True
-            return [proto.version, proto.network_id, chain_difficulty, chain_head_hash,
-                    genesis_hash]
+            network_id = proto.service.app.config['eth'].get('network_id', proto.network_id)
+            return [proto.version, network_id, chain_difficulty, chain_head_hash, genesis_hash]
 
     class gettransactions(BaseProtocol.command):
 

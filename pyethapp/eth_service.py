@@ -52,7 +52,7 @@ class ChainService(WiredService):
     """
     # required by BaseService
     name = 'chain'
-    default_config = dict(eth=dict(privkey_hex=''))
+    default_config = dict(eth=dict(privkey_hex='', network_id=0))
 
     # required by WiredService
     wire_protocol = eth_protocol.ETHProtocol  # create for each peer
