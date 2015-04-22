@@ -19,13 +19,13 @@ pyethapp
 Introduction
 ------------
 
-pyethapp is the python based client for the Ethereum_ blockchain 2.0 system.
+pyethapp is the python based client implementing the Ethereum_ cryptoeconomic state machine.
 
 Ethereum as a platform is focussed on enabling people to build new ideas using blockchain technology.
 
 The python implementation aims to provide an easily hackable and extendable codebase.
 
-pyetapp leverages two ethereum core components to implement the client:
+pyethapp leverages two ethereum core components to implement the client:
 
 * pyethereum_ - the core library, featuring the blockchain, the ethereum virtual machine, mining
 * pydevp2p_ - the p2p networking library, featuring node discovery for and transport of multiple services over multiplexed and encrypted connections
@@ -36,7 +36,22 @@ pyetapp leverages two ethereum core components to implement the client:
 .. _pydevp2p: https://github.com/ethereum/pydevp2p
 
 
+Installation and invocation
+---------------------------
+
+* git clone https://github.com/ethereum/pyethapp
+* cd pyethapp
+* python setup.py install
+* pyethapp      (shows help)
+* pyethapp run  (starts the client)
+
+There is also Dockerfile in the repo.
+
+
 Status
 ------
 
-Working prototype, which is interoperable with the go and cpp clients.
+ * Working PoC9 prototype
+ * interoperable with the go and cpp clients
+ * jsonrpc (mostly)
+
