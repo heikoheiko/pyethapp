@@ -91,20 +91,33 @@ class ChainService(WiredService):
             self.add_blocks_lock = True
             gevent.spawn(self._add_blocks)
 
+    def knows_block(self, block_hash):
+        "if block is in chain or in queue"
+        if block_hash in self.chain:
+            return True
+        # check if queued or processed
+        for i in range(len(self.block_queue.queue)):
+            if block_hash == self.block_queue.queue[i][0].header.hash:
+                return True
+        return False
+
     def _add_blocks(self):
         log.debug('add_blocks', qsize=self.block_queue.qsize())
         try:
             while not self.block_queue.empty():
-                t_block, proto = self.block_queue.get()
+                t_block, proto = self.block_queue.peek()  # peek: knows_block while processing
                 if t_block.header.hash in self.chain:
                     log.warn('known block', block=t_block)
+                    self.block_queue.get()
                     continue
                 if t_block.header.prevhash not in self.chain:
                     log.warn('missing parent', block=t_block)
+                    self.block_queue.get()
                     continue
                 if not t_block.header.check_pow():
                     log.warn('invalid pow', block=t_block)
                     # FIXME ban node
+                    self.block_queue.get()
                     continue
                 try:  # deserialize
                     st = time.time()
@@ -114,12 +127,15 @@ class ChainService(WiredService):
                               gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
                 except processblock.InvalidTransaction as e:
                     log.warn('invalid transaction', block=t_block, error=e)
+                    gevent.sleep(0.001)
                     # FIXME ban node
                     continue
 
                 if self.chain.add_block(block):
                     log.debug('added', block=block)
+                self.block_queue.get()
                 gevent.sleep(0.001)
+
         finally:
             self.add_blocks_lock = False
 

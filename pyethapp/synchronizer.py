@@ -261,7 +261,10 @@ class Synchronizer(object):
         log.debug('newblock', proto=proto, block=t_block, chain_difficulty=chain_difficulty,
                   client=proto.peer.remote_client_version)
 
-        if t_block.header.hash in self.chain:
+        # memorize proto with difficulty
+        self._protocols[proto] = chain_difficulty
+
+        if self.chainservice.knows_block(block_hash=t_block.header.hash):
             log.debug('known block')
             return
 
@@ -269,9 +272,6 @@ class Synchronizer(object):
         if not t_block.header.check_pow():
             log.warn('check pow failed, should ban!')
             return
-
-        # memorize proto with difficulty
-        self._protocols[proto] = chain_difficulty
 
         expected_difficulty = self.chain.head.chain_difficulty() + t_block.header.difficulty
         if chain_difficulty >= self.chain.head.chain_difficulty():
@@ -289,7 +289,7 @@ class Synchronizer(object):
         # unknown and pow check and highest difficulty
 
         # check if we have parent
-        if t_block.header.prevhash in self.chain:
+        if self.chainservice.knows_block(block_hash=t_block.header.prevhash):
             log.debug('adding block')
             self.chainservice.add_block(t_block, proto)
         else:
