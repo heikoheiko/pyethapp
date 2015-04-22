@@ -18,6 +18,7 @@ import ethereum.slogging as slogging
 import config as konfig
 from db_service import DBService
 from jsonrpc import JSONRPCServer
+from pow_service import PoWService
 from pyethapp import __version__
 import utils
 
@@ -25,7 +26,7 @@ slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
 
 
-services = [DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer, Console]
+services = [PoWService, DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer, Console]
 services += utils.load_contrib_services()
 
 
