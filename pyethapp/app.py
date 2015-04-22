@@ -84,10 +84,11 @@ def app(ctx, alt_config, config_values, data_dir, log_config):
 @click.option('--dev/--nodev', default=False, help='Exit at unhandled exceptions')
 @click.pass_context
 def run(ctx, dev):
-    """Start the client"""
+    """Start the client ( --dev to stop on error)"""
     # create app
     app = EthApp(ctx.obj['config'])
 
+    # development mode
     if dev:
         gevent.get_hub().SYSTEM_ERROR = BaseException
         try:
