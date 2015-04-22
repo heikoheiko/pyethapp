@@ -148,8 +148,9 @@ class SyncTask(object):
                 if not t_blocks:
                     log.warn('empty getblocks reply, trying next proto')
                     continue
-                else:
-                    assert isinstance(t_blocks[0], TransientBlock)
+                elif not isinstance(t_blocks[0], TransientBlock):
+                    log.warn('received unecpected data', data=repr(t_blocks))
+                    continue
                 # we have results
                 if not [b.header.hash for b in t_blocks] == blockhashes_batch[:len(t_blocks)]:
                     log.warn('received wrong blocks, should ban peer')
@@ -312,7 +313,7 @@ class Synchronizer(object):
 
         elif chain_difficulty > self.chain.head.chain_difficulty():
             log.debug('sufficient difficulty')
-            if not self.synctask:
+            if blockhash not in self.chain and not self.synctask:
                 self.synctask = SyncTask(self, proto, blockhash, chain_difficulty)
             else:
                 log.debug('existing task, discarding')
