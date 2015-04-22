@@ -51,7 +51,7 @@ There is also Dockerfile in the repo.
 Status
 ------
 
- * Working PoC9 prototype
- * interoperable with the go and cpp clients
- * jsonrpc (mostly)
+* Working PoC9 prototype
+* interoperable with the go and cpp clients
+* jsonrpc (mostly)
 
