@@ -7,6 +7,7 @@ from ethereum import processblock
 from synchronizer import Synchronizer
 from ethereum.slogging import get_logger
 from ethereum.chain import Chain
+from ethereum.transactions import Transaction
 from devp2p.service import WiredService
 import eth_protocol
 import gevent
@@ -19,6 +20,8 @@ processblock_apply_transaction = processblock.apply_transaction
 
 
 def apply_transaction(block, tx):
+    # import traceback
+    # print traceback.print_stack()
     log.debug('apply_transaction ctx switch', at=time.time())
     gevent.sleep(0.001)
     return processblock_apply_transaction(block, tx)
@@ -149,6 +152,16 @@ class ChainService(WiredService):
             bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
                   exclude_peers=[origin.peer])
 
+    def broadcast_transaction(self, tx, origin=None):
+        assert isinstance(tx, Transaction)
+        if self.broadcast_filter.known(tx.hash):
+            log.debug('already broadcasted tx')
+        else:
+            log.debug('broadcasting tx', origin=origin)
+            bcast = self.app.services.peermanager.broadcast
+            bcast(eth_protocol.ETHProtocol, 'transactions', args=(tx,),
+                  exclude_peers=[origin.peer])
+
     # wire protocol receivers ###########
 
     def on_wire_protocol_start(self, proto):
@@ -201,11 +214,9 @@ class ChainService(WiredService):
     def on_receive_transactions(self, proto, transactions):
         "receives rlp.decoded serialized"
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
-        log.debug('skipping, FIXME')
-        return
         for tx in transactions:
-            # fixme bloomfilter
-            self.chain.add_transaction(tx)
+            if self.chain.add_transaction(tx):
+                self.broadcast_transaction(tx, origin=proto)  # send as fast as possible
 
     # blockhashes ###########
 
@@ -252,8 +263,9 @@ class ChainService(WiredService):
             proto.send_blocks(*found)
 
     def on_receive_blocks(self, proto, transient_blocks):
+        blk_number = max(x.header.number for x in transient_blocks) if transient_blocks else 0
         log.debug("recv blocks", count=len(transient_blocks), remote_id=proto,
-                  highest_number=max(x.header.number for x in transient_blocks))
+                  highest_number=blk_number)
         if transient_blocks:
             self.synchronizer.receive_blocks(proto, transient_blocks)
 
