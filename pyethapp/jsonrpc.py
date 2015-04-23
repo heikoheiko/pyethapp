@@ -335,7 +335,6 @@ def block_encoder(block, include_transactions, pending=False):
         'extraData': data_encoder(block.extra_data),
         'size': quantity_encoder(len(rlp.encode(block))),
         'gasLimit': quantity_encoder(block.gas_limit),
-        'minGasPrice': quantity_encoder(0),  # TODO quantity_encoder(block.gas_price),
         'gasUsed': quantity_encoder(block.gas_used),
         'timestamp': quantity_encoder(block.timestamp),
         'uncles': [data_encoder(u.hash) for u in block.uncles]
