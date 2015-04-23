@@ -3,7 +3,9 @@ import gevent
 import time
 from eth_protocol import TransientBlock
 from ethereum.slogging import get_logger
-log = get_logger('eth.sync.task')
+
+log = get_logger('eth.sync')
+log_st = get_logger('eth.sync.task')
 
 
 class SyncTask(object):
@@ -38,7 +40,7 @@ class SyncTask(object):
         gevent.spawn(self.run)
 
     def run(self):
-        log.info('spawning new syntask')
+        log_st.info('spawning new syntask')
         try:
             self.fetch_hashchain()
         except Exception as e:
@@ -46,18 +48,18 @@ class SyncTask(object):
             raise e
 
     def run(self):
-        log.info('spawning new syntask')
+        log_st.info('spawning new syntask')
         self.fetch_hashchain()
 
     def exit(self, success=False):
         if not success:
-            log.warn('syncing failed')
+            log_st.warn('syncing failed')
         else:
-            log.debug('sucessfully synced')
+            log_st.debug('sucessfully synced')
         self.synchronizer.synctask_exited(success)
 
     def fetch_hashchain(self):
-        log.debug('fetching hashchain')
+        log_st.debug('fetching hashchain')
         blockhashes_chain = [self.blockhash]  # youngest to oldest
 
         blockhash = self.blockhash
@@ -72,7 +74,7 @@ class SyncTask(object):
             # try with protos
             protocols = self.synchronizer.protocols
             if not protocols:
-                log.warn('no protocols available')
+                log_st.warn('no protocols available')
                 return self.exit(success=False)
 
             for proto in protocols:
@@ -88,7 +90,7 @@ class SyncTask(object):
                     blockhashes_batch = deferred.get(block=True,
                                                      timeout=self.blockhashes_request_timeout)
                 except gevent.Timeout:
-                    log.warn('syncing timed out')
+                    log_st.warn('syncing timed out')
                     continue
                 finally:
                     # is also executed 'on the way out' when any other clause of the try statement
@@ -96,7 +98,7 @@ class SyncTask(object):
                     del self.requests[proto]
 
                 if not blockhashes_batch:
-                    log.warn('empty getblockhashes result')
+                    log_st.warn('empty getblockhashes result')
                     continue
                 break
 
@@ -105,8 +107,8 @@ class SyncTask(object):
                 if blockhash not in self.chain:
                     blockhashes_chain.append(blockhash)
                 else:
-                    log.debug('found known blockhash', blockhash=blockhash.encode('hex'),
-                              is_genesis=bool(blockhash == self.chain.genesis.hash))
+                    log_st.debug('found known blockhash', blockhash=blockhash.encode('hex'),
+                                 is_genesis=bool(blockhash == self.chain.genesis.hash))
                     break
             max_blockhashes_per_request = self.max_blockhashes_per_request
 
@@ -114,7 +116,7 @@ class SyncTask(object):
 
     def fetch_blocks(self, blockhashes_chain):
         # fetch blocks (no parallelism here)
-        log.debug('fetching blocks', num=len(blockhashes_chain))
+        log_st.debug('fetching blocks', num=len(blockhashes_chain))
         assert blockhashes_chain
         blockhashes_chain.reverse()  # oldest to youngest
         num_blocks = len(blockhashes_chain)
@@ -127,57 +129,59 @@ class SyncTask(object):
             # try with protos
             protocols = self.synchronizer.protocols
             if not protocols:
-                log.warn('no protocols available')
+                log_st.warn('no protocols available')
                 return self.exit(success=False)
 
             for proto in protocols:
                 assert proto not in self.requests
                 assert not proto.is_stopped
                 # request
-                log.debug('requesting blocks', num=len(blockhashes_batch))
+                log_st.debug('requesting blocks', num=len(blockhashes_batch))
                 deferred = AsyncResult()
                 self.requests[proto] = deferred
                 proto.send_getblocks(*blockhashes_batch)
                 try:
                     t_blocks = deferred.get(block=True, timeout=self.blocks_request_timeout)
                 except gevent.Timeout:
-                    log.warn('getblocks timed out, trying next proto')
+                    log_st.warn('getblocks timed out, trying next proto')
                     continue
                 finally:
                     del self.requests[proto]
                 if not t_blocks:
-                    log.warn('empty getblocks reply, trying next proto')
+                    log_st.warn('empty getblocks reply, trying next proto')
                     continue
                 elif not isinstance(t_blocks[0], TransientBlock):
-                    log.warn('received unecpected data', data=repr(t_blocks))
+                    log_st.warn('received unexpected data', data=repr(t_blocks))
+                    t_blocks = []
                     continue
                 # we have results
                 if not [b.header.hash for b in t_blocks] == blockhashes_batch[:len(t_blocks)]:
-                    log.warn('received wrong blocks, should ban peer')
+                    log_st.warn('received wrong blocks, should ban peer')
+                    t_blocks = []
                     continue
                 break
 
             # add received t_blocks
             num_fetched += len(t_blocks)
-            log.debug('received blocks', num=len(t_blocks), num_fetched=num_fetched,
-                      total=num_blocks, missing=num_blocks - num_fetched)
+            log_st.debug('received blocks', num=len(t_blocks), num_fetched=num_fetched,
+                         total=num_blocks, missing=num_blocks - num_fetched)
 
             if not t_blocks:
-                log.warn('failed to fetch blocks', missing=len(blockhashes_chain))
+                log_st.warn('failed to fetch blocks', missing=len(blockhashes_chain))
                 return self.exit(success=False)
 
             ts = time.time()
-            log.debug('adding blocks', qsize=self.chainservice.block_queue.qsize())
+            log_st.debug('adding blocks', qsize=self.chainservice.block_queue.qsize())
             for t_block in t_blocks:
                 assert t_block.header.hash == blockhashes_chain.pop(0)
                 self.chainservice.add_block(t_block, proto)  # this blocks if the queue is full
-            log.debug('adding blocks done', took=time.time() - ts)
+            log_st.debug('adding blocks done', took=time.time() - ts)
 
         # done
         last_block = t_block
         assert not len(blockhashes_chain)
         assert last_block.header.hash == self.blockhash
-        log.debug('syncing finished')
+        log_st.debug('syncing finished')
         # at this point blocks are not in the chain yet, but in the add_block queue
         if self.chain_difficulty >= self.chain.head.chain_difficulty():
             self.chainservice.broadcast_newblock(last_block, self.chain_difficulty, origin=proto)
@@ -197,9 +201,6 @@ class SyncTask(object):
             log.debug('unexpected blockashes')
             return
         self.requests[proto].set(blockhashes)
-
-
-log = get_logger('eth.sync')
 
 
 class Synchronizer(object):
