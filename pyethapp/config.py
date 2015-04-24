@@ -69,7 +69,7 @@ def mk_privkey_hex():
 
 
 def setup_required_config(data_dir=default_data_dir):
-    "writes minimal neccessary config to data_dir"
+    "writes minimal necessary config to data_dir"
     log.info('setup default config', path=data_dir)
     config_path = get_config_path(data_dir)
     assert not os.path.exists(config_path)

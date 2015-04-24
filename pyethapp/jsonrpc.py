@@ -36,6 +36,7 @@ class WSGIServerLogger(object):
         cls._log.debug(msg.strip())
     write = log
 
+    @classmethod
     def log_error(cls, msg, *args):
         cls._log.error(msg % args)
 
@@ -307,7 +308,7 @@ def tx_hash_decoder(data):
 
 def bool_decoder(data):
     if not isinstance(data, bool):
-        raise BadRequestError('Paremter must be boolean')
+        raise BadRequestError('Parameter must be boolean')
     return data
 
 
