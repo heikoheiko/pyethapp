@@ -22,7 +22,7 @@ class LevelDB(object):
         if key in self.uncommitted:
             if self.uncommitted[key] is None:
                 raise KeyError("key not in db")
-            log.trace('from uncommited')
+            log.trace('from uncommitted')
             return self.uncommitted[key]
         log.trace('from db')
         o = decompress(self.db.Get(key))

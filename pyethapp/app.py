@@ -108,7 +108,7 @@ def run(ctx, dev):
     # start app
     app.start()
 
-    # wait for interupt
+    # wait for interrupt
     evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)
@@ -182,7 +182,7 @@ def blocktest(ctx, file, name):
     for block in blocks[1:]:
         app.services.chain.chain.add_block(block)
 
-    # wait for interupt
+    # wait for interrupt
     evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)

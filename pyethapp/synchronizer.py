@@ -55,7 +55,7 @@ class SyncTask(object):
         if not success:
             log_st.warn('syncing failed')
         else:
-            log_st.debug('sucessfully synced')
+            log_st.debug('successfully synced')
         self.synchronizer.synctask_exited(success)
 
     def fetch_hashchain(self):
@@ -198,7 +198,7 @@ class SyncTask(object):
     def receive_blockhashes(self, proto, blockhashes):
         log.debug('blockhashes received', proto=proto, num=len(blockhashes))
         if proto not in self.requests:
-            log.debug('unexpected blockashes')
+            log.debug('unexpected blockhashes')
             return
         self.requests[proto].set(blockhashes)
 
