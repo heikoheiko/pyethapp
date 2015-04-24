@@ -439,11 +439,11 @@ class Net(Subdispatcher):
     """Subdispatcher for network related RPC methods."""
 
     prefix = 'net_'
-    required_services = ['peermanager']
+    required_services = ['discovery', 'peermanager']
 
     @public
     def version(self):
-        return str(ETHProtocol.version)
+        return str(self.discovery.protocol.version)
 
     @public
     def listening(self):
@@ -571,6 +571,10 @@ class Chain(Subdispatcher):
 
     prefix = 'eth_'
     required_services = ['chain']
+
+    @public
+    def protocolVersion(self):
+        return str(ETHProtocol.version)
 
     @public
     @encode_res(quantity_encoder)
