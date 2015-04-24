@@ -3,8 +3,8 @@ from decorator import decorator
 from collections import Iterable
 import inspect
 import ethereum.blocks
-from ethereum.utils import (is_numeric, is_string, int_to_big_endian, encode_hex, decode_hex, sha3,
-                            zpad)
+from ethereum.utils import (is_numeric, is_string, int_to_big_endian, big_endian_to_int,
+                            encode_hex, decode_hex, sha3, zpad)
 import ethereum.slogging as slogging
 from ethereum.transactions import Transaction
 from ethereum import processblock
@@ -278,7 +278,7 @@ def address_decoder(data):
 
 def address_encoder(address):
     assert len(address) == 20
-    return encode_hex(address)
+    return '0x' + encode_hex(address)
 
 
 def block_id_decoder(data):
@@ -854,12 +854,18 @@ class Filter(object):
     :ivar new_logs: same as :attr:`logs`, but is reset at every access
     """
 
-    def __init__(self, chain, blocks=[], addresses=None, topics=None,
+    def __init__(self, chain, blocks=None, addresses=None, topics=None,
                  pending=False, latest=False):
         self.chain = chain
-        self.blocks = blocks
+        if blocks is not None:
+            self.blocks = blocks
+        else:
+            self.blocks = []
         self.addresses = addresses
         self.topics = topics
+        if self.topics:
+            for topic in self.topics:
+                assert topic is None or is_numeric(topic)
         self.pending = pending
         self.latest = latest
 
@@ -874,17 +880,29 @@ class Filter(object):
             blocks_to_check.append(self.chain.head_candidate)
         if self.latest:
             blocks_to_check.append(self.chain.head)
+        # go through all receipts of all blocks
         for block in blocks_to_check:
             receipts = block.get_receipts()
             for receipt in receipts:
                 for i, log in enumerate(receipt.logs):
-                    if self.topics is not None and len(set(log.topics) & set(self.topics)) == 0:
-                        continue
+                    if self.topics is not None:
+                        # compare topics one by one
+                        topic_match = True
+                        if len(log.topics) < len(self.topics):
+                            topic_match = False
+                        for filter_topic, log_topic in zip(self.topics, log.topics):
+                            if filter_topic is not None and filter_topic != log_topic:
+                                topic_match = False
+                        if not topic_match:
+                            continue
+                    # check for address
                     if self.addresses is not None and log.address not in self.addresses:
                         continue
+                    # still here, so match was successful => add to log list
                     id_ = ethereum.utils.sha3rlp(log)
                     self._logs[id_] = (log, i, block)
                     self._new_logs[id_] = (log, i, block)
+        # don't check blocks again, that have been checked already and won't change anymore
         self.blocks_done |= set(blocks_to_check)
         self.blocks_done -= set([self.chain.head_candidate])
 
@@ -931,13 +949,18 @@ class FilterManager(Subdispatcher):
             addresses = None
         else:
             raise JSONRPCInvalidParamsError('Parameter must be address or list of addresses')
-        if 'topic' in filter_dict:
-            topics = [data_decoder(topic) for topic in filter_dict['topics']]
+        if 'topics' in filter_dict:
+            topics = []
+            for topic in filter_dict['topics']:
+                if topic is not None:
+                    topics.append(big_endian_to_int(data_decoder(topic)))
+                else:
+                    topics.append(None)
         else:
             topics = None
 
         blocks = [b1]
-        while blocks[-1] != b1:
+        while blocks[-1] != b0:
             blocks.append(blocks[-1].get_parent())
         filter_ = Filter(self.chain.chain, reversed(blocks), addresses, topics)
         self.filters[self.next_id] = filter_
