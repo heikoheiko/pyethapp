@@ -384,7 +384,6 @@ def loglist_encoder(loglist):
     result = []
     for log, index, block in loglist:
         result.append({
-            'hash': data_encoder(log.hash),
             'logIndex': quantity_encoder(index),
             'transactionIndex': None,
             'transactionHash': None,
@@ -392,7 +391,7 @@ def loglist_encoder(loglist):
             'blockNumber': quantity_encoder(block.number),
             'address': address_encoder(log.address),
             'data': data_encoder(log.data),
-            'topics': [data_encoder(topic) for topic in log.topics]
+            'topics': [data_encoder(int_to_big_endian(topic), 32) for topic in log.topics]
         })
     return result
 
@@ -830,14 +829,14 @@ class Chain(Subdispatcher):
 
 class Filter(object):
 
-    """A filter looking for specific logs.
+    """A filter for logs.
 
     :ivar blocks: a list of block numbers
     :ivar addresses: a list of contract addresses or None to not consider
                      addresses
     :ivar topics: a list of topics or `None` to not consider topics
-    :ivar pending: if `True` look for logs from the current pending block
-    :ivar latest: if `True` look for logs from the current head
+    :ivar pending: if `True` also look for logs from the current pending block
+    :ivar latest: if `True` also look for logs from the current head
     :ivar blocks_done: a list of blocks that don't have to be searched again
     :ivar logs: a list of (:class:`ethereum.processblock.Log`, int, :class:`ethereum.blocks.Block`)
                 triples that have been found
@@ -865,27 +864,29 @@ class Filter(object):
         if self.latest:
             blocks_to_check.append(self.chain.head)
         for block in blocks_to_check:
-            for i, log in enumerate(block.logs):
-                if log.hash not in self.logs:
+            receipts = block.get_receipts()
+            for receipt in receipts:
+                for i, log in enumerate(receipt.logs):
                     if self.topics is not None and len(set(log.topics) & set(self.topics)) == 0:
                         continue
                     if self.addresses is not None and log.address not in self.addresses:
                         continue
-                    self._logs[log.hash] = (log, i, block)
-                    self._new_logs[log.hash] = (log, i, block)
+                    id_ = ethereum.utils.sha3rlp(log)
+                    self._logs[id_] = (log, i, block)
+                    self._new_logs[id_] = (log, i, block)
         self.blocks_done |= set(blocks_to_check)
         self.blocks_done -= set([self.chain.head_candidate])
 
     @property
     def logs(self):
         self.check()
-        return self._new_logs
+        return self._logs.values()
 
     @property
     def new_logs(self):
         ret = self._new_logs.copy()
         self._new_logs = {}
-        return ret
+        return ret.values()
 
 
 class FilterManager(Subdispatcher):
@@ -919,7 +920,10 @@ class FilterManager(Subdispatcher):
             addresses = None
         else:
             raise JSONRPCInvalidParamsError('Parameter must be address or list of addresses')
-        topics = [data_decoder(topic) for topic in filter_dict.get('topics', [])]
+        if 'topic' in filter_dict:
+            topics = [data_decoder(topic) for topic in filter_dict['topics']]
+        else:
+            topics = None
 
         blocks = [b1]
         while blocks[-1] != b1:
