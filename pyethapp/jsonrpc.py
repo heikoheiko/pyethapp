@@ -528,7 +528,11 @@ class Miner(Subdispatcher):
     @public
     @encode_res(quantity_encoder)
     def gasPrice(self):
-        return 0
+        return 1
+
+    @public
+    def accounts(self):
+        return [address_encoder(addr) for addr in ['\x00' * 20]]
 
 
 class DB(Subdispatcher):
@@ -610,10 +614,13 @@ class Chain(Subdispatcher):
 
     @public
     @decode_arg('block_hash', block_hash_decoder)
-    @encode_res(quantity_encoder)
     def getBlockTransactionCountByHash(self, block_hash):
-        block = self.json_rpc_server.get_block(block_hash)
-        return block.transaction_count
+        try:
+            block = self.json_rpc_server.get_block(block_hash)
+        except KeyError:
+            return None
+        else:
+            return quantity_encoder(block.transaction_count)
 
     @public
     @decode_arg('block_id', block_id_decoder)
