@@ -161,7 +161,7 @@ class JSONRPCServer(BaseService):
         if block_id == 'latest':
             return chain.head
         if block_id == 'earliest':
-            return chain.genesis
+            block_id = 0
         if is_numeric(block_id):
             # by number
             hash_ = chain.index.get_block_by_number(block_id)
@@ -333,17 +333,15 @@ def block_encoder(block, include_transactions=False, pending=False, is_header=Fa
         'logsBloom': data_encoder(int_to_big_endian(block.bloom), 256),
         'transactionsRoot': data_encoder(block.tx_list_root),
         'stateRoot': data_encoder(block.state_root),
-        'miner': data_encoder(block.coinbase),
         'difficulty': quantity_encoder(block.difficulty),
-        'coinbase': address_encoder(block.coinbase),
         'extraData': data_encoder(block.extra_data),
         'gasLimit': quantity_encoder(block.gas_limit),
         'gasUsed': quantity_encoder(block.gas_used),
         'timestamp': quantity_encoder(block.timestamp),
     }
     if not is_header:
-        d['totalDifficulty'] = quantity_encoder(block.chain_difficulty()),
-        d['size'] = quantity_encoder(len(rlp.encode(block))),
+        d['totalDifficulty'] = quantity_encoder(block.chain_difficulty())
+        d['size'] = quantity_encoder(len(rlp.encode(block)))
         d['uncles'] = [data_encoder(u.hash) for u in block.uncles]
         if include_transactions:
             d['transactions'] = []
@@ -351,6 +349,12 @@ def block_encoder(block, include_transactions=False, pending=False, is_header=Fa
                 d['transactions'].append(tx_encoder(tx, block, i, pending))
         else:
             d['transactions'] = [data_encoder(tx.hash) for tx in block.get_transactions()]
+    if not pending:
+        d['miner'] = data_encoder(block.coinbase)
+        d['nonce'] = data_encoder(block.nonce)
+    else:
+        d['miner'] = '0x0000000000000000000000000000000000000000'
+        d['nonce'] = '0x0000000000000000'
     return d
 
 
@@ -678,7 +682,7 @@ class Chain(Subdispatcher):
             block = self.json_rpc_server.get_block(block_id)
         except KeyError:
             return None
-        return block_encoder(block, include_transactions)
+        return block_encoder(block, include_transactions, pending=block_id == 'pending')
 
     @public
     @decode_arg('tx_hash', tx_hash_decoder)
