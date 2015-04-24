@@ -311,14 +311,19 @@ def bool_decoder(data):
     return data
 
 
-def block_encoder(block, include_transactions, pending=False):
+def block_encoder(block, include_transactions=False, pending=False, is_header=False):
     """Encode a block as JSON object.
 
     :param block: a :class:`ethereum.blocks.Block`
     :param include_transactions: if true transactions are included, otherwise
                                  only their hashes
+    :param pending: if `True` the block number of transactions, if included, is set to `None`
+    :param is_header: if `True` the following attributes are ommitted: size, totalDifficulty,
+                      transactions and uncles (thus, the function can be called with a block
+                      header instead of a full block)
     :returns: a json encodable dictionary
     """
+    assert not (include_transactions and is_header)
     d = {
         'number': quantity_encoder(block.number),
         'hash': data_encoder(block.hash),
@@ -331,20 +336,21 @@ def block_encoder(block, include_transactions, pending=False):
         'miner': data_encoder(block.coinbase),
         'difficulty': quantity_encoder(block.difficulty),
         'coinbase': address_encoder(block.coinbase),
-        'totalDifficulty': quantity_encoder(block.chain_difficulty()),
         'extraData': data_encoder(block.extra_data),
-        'size': quantity_encoder(len(rlp.encode(block))),
         'gasLimit': quantity_encoder(block.gas_limit),
         'gasUsed': quantity_encoder(block.gas_used),
         'timestamp': quantity_encoder(block.timestamp),
-        'uncles': [data_encoder(u.hash) for u in block.uncles]
     }
-    if include_transactions:
-        d['transactions'] = []
-        for i, tx in enumerate(block.get_transactions()):
-            d['transactions'].append(tx_encoder(tx, block, i, pending))
-    else:
-        d['transactions'] = [data_encoder(tx.hash) for tx in block.get_transactions()]
+    if not is_header:
+        d['totalDifficulty'] = quantity_encoder(block.chain_difficulty()),
+        d['size'] = quantity_encoder(len(rlp.encode(block))),
+        d['uncles'] = [data_encoder(u.hash) for u in block.uncles]
+        if include_transactions:
+            d['transactions'] = []
+            for i, tx in enumerate(block.get_transactions()):
+                d['transactions'].append(tx_encoder(tx, block, i, pending))
+        else:
+            d['transactions'] = [data_encoder(tx.hash) for tx in block.get_transactions()]
     return d
 
 
@@ -699,23 +705,23 @@ class Chain(Subdispatcher):
     @decode_arg('block_hash', block_hash_decoder)
     @decode_arg('index', quantity_decoder)
     def getUncleByBlockHashAndIndex(self, block_hash, index):
-        block = self.json_rpc_server.get_block(block_hash)
         try:
-            uncle_hash = block.uncles[index].hash
-        except IndexError:
+            block = self.json_rpc_server.get_block(block_hash)
+            uncle = block.uncles[index]
+        except (IndexError, KeyError):
             return None
-        return block_encoder(self.json_rpc_server.get_block(uncle_hash))
+        return block_encoder(uncle, is_header=True)
 
     @public
     @decode_arg('block_number', quantity_decoder)
     @decode_arg('index', quantity_decoder)
     def getUncleByBlockNumberAndIndex(self, block_number, index):
-        block = self.json_rpc_server.get_block(block_number)
         try:
-            uncle_hash = block.uncles[index].hash
-        except IndexError:
+            block = self.json_rpc_server.get_block(block_number)
+            uncle = block.uncles[index]
+        except (IndexError, KeyError):
             return None
-        return block_encoder(self.json_rpc_server.get_block(uncle_hash))
+        return block_encoder(uncle, is_header=True)
 
     @public
     def getWork(self):
