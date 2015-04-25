@@ -135,7 +135,7 @@ class ChainService(WiredService):
                     continue
 
                 if self.chain.add_block(block):
-                    log.debug('added', block=block)
+                    log.info('added', block=block)
                 self.block_queue.get()
                 gevent.sleep(0.001)
 

@@ -78,8 +78,8 @@ class SyncTask(object):
                 return self.exit(success=False)
 
             for proto in protocols:
-                assert proto not in self.requests
-                assert not proto.is_stopped
+                if proto.is_stopped:
+                    continue
 
                 # request
                 assert proto not in self.requests
@@ -133,8 +133,9 @@ class SyncTask(object):
                 return self.exit(success=False)
 
             for proto in protocols:
+                if proto.is_stopped:
+                    continue
                 assert proto not in self.requests
-                assert not proto.is_stopped
                 # request
                 log_st.debug('requesting blocks', num=len(blockhashes_batch))
                 deferred = AsyncResult()
