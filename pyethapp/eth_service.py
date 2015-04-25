@@ -152,8 +152,11 @@ class ChainService(WiredService):
         finally:
             self.add_blocks_lock = False
 
-    def broadcast_newblock(self, block, chain_difficulty, origin=None):
-        assert isinstance(block, eth_protocol.TransientBlock)
+    def broadcast_newblock(self, block, chain_difficulty=None, origin=None):
+        if not chain_difficulty:
+            assert block.hash in self.chain
+            chain_difficulty = block.chain_difficulty()
+        assert isinstance(block, (eth_protocol.TransientBlock, Block))
         if self.broadcast_filter.known(block.header.hash):
             log.debug('already broadcasted block')
         else:

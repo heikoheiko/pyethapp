@@ -773,7 +773,7 @@ class Chain(Subdispatcher):
             return False
         print 'PoW check true'
         self.chain.chain.add_block(h)
-        self.chain.broadcast(h)
+        self.chain.broadcast_newblock(h)
         print 'Added: %d' % h.header.number
         return True
 
