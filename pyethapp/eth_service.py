@@ -76,10 +76,10 @@ class ChainService(WiredService):
         assert self.db is not None
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
-        self.chain = Chain(self.db, new_head_cb=self._on_new_head)
+        coinbase = privtoaddr(self.config['eth']['privkey_hex'].decode('hex'))
+        self.chain = Chain(self.db, new_head_cb=self._on_new_head, coinbase=coinbase)
         log.info('chain at', number=self.chain.head.number)
         self.synchronizer = Synchronizer(self, force_sync=None)
-        self.chain.coinbase = privtoaddr(self.config['eth']['privkey_hex'].decode('hex'))
 
         self.block_queue = Queue(maxsize=self.block_queue_size)
         self.transaction_queue = Queue(maxsize=self.transaction_queue_size)
