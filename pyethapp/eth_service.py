@@ -7,10 +7,12 @@ from ethereum import processblock
 from synchronizer import Synchronizer
 from ethereum.slogging import get_logger
 from ethereum.chain import Chain
+from ethereum.blocks import Block
 from ethereum.transactions import Transaction
 from devp2p.service import WiredService
 import eth_protocol
 import gevent
+import gevent.lock
 from gevent.queue import Queue
 log = get_logger('eth.chainservice')
 
@@ -82,10 +84,18 @@ class ChainService(WiredService):
         self.block_queue = Queue(maxsize=self.block_queue_size)
         self.transaction_queue = Queue(maxsize=self.transaction_queue_size)
         self.add_blocks_lock = False
+        self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
 
     def _on_new_head(self, block):
         pass
+
+    def add_transaction(self, tx, origin=None):
+        self.add_transaction_lock.acquire()
+        success = self.chain.add_transaction(tx)
+        self.add_transaction_lock.release()
+        if success:
+            self.broadcast_transaction(tx, origin=None)  # send as fast as possible
 
     def add_block(self, t_block, proto):
         "adds a block to the block_queue and spawns _add_block if not running"
@@ -215,8 +225,7 @@ class ChainService(WiredService):
         "receives rlp.decoded serialized"
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
         for tx in transactions:
-            if self.chain.add_transaction(tx):
-                self.broadcast_transaction(tx, origin=proto)  # send as fast as possible
+            self.add_transaction(tx, origin=proto)
 
     # blockhashes ###########
 
