@@ -72,7 +72,7 @@ def test_blocks():
     packet = peer.packets.pop()
     assert len(rlp.decode(packet.payload)) == 3
 
-    def list_cb(proto, blocks):  # diferent cb, as we expect a list of blocks
+    def list_cb(proto, blocks):  # different cb, as we expect a list of blocks
         cb_data.append((proto, blocks))
 
     proto.receive_blocks_callbacks.append(list_cb)

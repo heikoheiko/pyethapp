@@ -40,9 +40,7 @@ def load_block_tests(data, db):
     for address, acct_state in data['pre'].items():
         address = ethereum.utils.decode_hex(address)
         balance = scanners['int256b'](acct_state['balance'][2:])
-        nonce = acct_state['nonce'][2:]
-        if nonce != '0':
-            nonce = scanners['int256b'](nonce),
+        nonce = scanners['int256b'](acct_state['nonce'][2:])
         initial_alloc[address] = {
             'balance': balance,
             'code': acct_state['code'],

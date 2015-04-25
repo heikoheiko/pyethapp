@@ -50,7 +50,7 @@ class GeventInputHook(object):
         self.manager.clear_inputhook()
 
 
-# ipython needes to accept "--gui gevent" option
+# ipython needs to accept "--gui gevent" option
 IPython.core.shellapp.InteractiveShellApp.gui.values += ('gevent',)
 
 
