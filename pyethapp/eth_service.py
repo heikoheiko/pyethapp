@@ -91,11 +91,13 @@ class ChainService(WiredService):
         pass
 
     def add_transaction(self, tx, origin=None):
+        assert isinstance(tx, Transaction)
+        log.debug('add_transaction', locked=self.add_transaction_lock.locked())
         self.add_transaction_lock.acquire()
         success = self.chain.add_transaction(tx)
         self.add_transaction_lock.release()
         if success:
-            self.broadcast_transaction(tx, origin=origin)  # send as fast as possible
+            self.broadcast_transaction(tx, origin=origin)  # asap
 
     def add_block(self, t_block, proto):
         "adds a block to the block_queue and spawns _add_block if not running"

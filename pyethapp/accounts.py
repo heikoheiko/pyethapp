@@ -56,6 +56,7 @@ class AccountsService(BaseService):
         return self.accounts[0].address
 
     def sign_tx(self, sender, tx):
+        # should be moved to Account where individual rules can be implemented
         assert sender in self
         a = self[sender]
         log.info('signing tx', tx=tx, account=a)
