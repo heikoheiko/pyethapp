@@ -6,11 +6,11 @@ log = get_logger('db')
 # load available databases
 dbs = {}
 try:
-    from leveldb_service import LevelDB
+    from leveldb_service import LevelDBService
 except ImportError:
     pass
 else:
-    dbs['LevelDB'] = LevelDB
+    dbs['LevelDB'] = LevelDBService
 
 try:
     from codernitydb_service import CodernityDB
@@ -18,6 +18,10 @@ except ImportError:
     pass
 else:
     dbs['CodernityDB'] = CodernityDB
+
+
+from ephemdb_service import EphemDB
+dbs['EphemDB'] = EphemDB
 
 
 class DBService(BaseService):

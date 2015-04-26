@@ -1,5 +1,5 @@
-
 import monkeypatches
+import json
 import sys
 import os
 import signal
@@ -12,40 +12,46 @@ from devp2p.peermanager import PeerManager
 from devp2p.discovery import NodeDiscovery
 from devp2p.app import BaseApp
 from eth_service import ChainService
+from console_service import Console
+from ethereum.blocks import Block
 import ethereum.slogging as slogging
 import config as konfig
-import utils
-from jsonrpc import JSONRPCServer
 from db_service import DBService
+from jsonrpc import JSONRPCServer
+from accounts import AccountsService
 from pyethapp import __version__
+import utils
 
 slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
 
 
-services = [DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer]
+services = [DBService, AccountsService, NodeDiscovery, PeerManager, ChainService,
+            JSONRPCServer, Console]
 services += utils.load_contrib_services()
 
 
 class EthApp(BaseApp):
-
-    client_version = 'pyethapp/v%s/%s/%s/%s' % (__version__,
-                                                sys.platform,
-                                                'py%d.%d.%d' % sys.version_info[:3],
-                                                os.getlogin())  # FIXME: for development only
+    client_version = 'pyethapp/v%s/%s/%s' % (__version__, sys.platform,
+                                             'py%d.%d.%d' % sys.version_info[:3])
     default_config = dict(BaseApp.default_config)
     default_config['client_version'] = client_version
 
 
-@click.command()
+@click.group(help='Welcome to ethapp version:{}'.format(EthApp.client_version))
 @click.option('alt_config', '--Config', '-C', type=click.File(), help='Alternative config file')
 @click.option('config_values', '-c', multiple=True, type=str,
               help='Single configuration parameters (<param>=<value>)')
-@click.option('show_config', '--show-config', '-s', multiple=False, type=bool,
-              help='Show the configuration')
-@click.option('data_dir', '--data-dir', '-d', multiple=False, type=bool,
+@click.option('data_dir', '--data-dir', '-d', multiple=False, type=str,
               help='data directory')
-def app(alt_config, config_values, show_config, data_dir):
+@click.option('log_config', '--log_config', '-l', multiple=False, type=str,
+              help='log_config string: e.g. ":info,eth:debug')
+@click.pass_context
+def app(ctx, alt_config, config_values, data_dir, log_config):
+
+    # configure logging
+    log_config = log_config or ':info'
+    slogging.configure(log_config)
 
     # data dir default or from cli option
     data_dir = data_dir or konfig.default_data_dir
@@ -60,7 +66,6 @@ def app(alt_config, config_values, show_config, data_dir):
         config = konfig.load_config(data_dir)
 
     config['data_dir'] = data_dir
-    konfig.dump_config(config)
 
     # add default config
     konfig.update_config_with_defaults(config, konfig.get_default_config([EthApp] + services))
@@ -74,12 +79,25 @@ def app(alt_config, config_values, show_config, data_dir):
             raise BadParameter('Config parameter must be of the form "a.b.c=d" where "a.b.c" '
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
-    if show_config:
-        konfig.dump_config(config)
-    konfig.dump_config(config)
+    ctx.obj = {'config': config}
 
+
+@app.command()
+@click.option('--dev/--nodev', default=False, help='Exit at unhandled exceptions')
+@click.pass_context
+def run(ctx, dev):
+    """Start the client ( --dev to stop on error)"""
     # create app
-    app = EthApp(config)
+    app = EthApp(ctx.obj['config'])
+
+    # development mode
+    if dev:
+        gevent.get_hub().SYSTEM_ERROR = BaseException
+        try:
+            ctx.obj['config']['client_version'] += '/' + os.getlogin()
+        except:
+            log.warn("can't get and add login name to client_version")
+            pass
 
     # register services
     for service in services:
@@ -89,13 +107,10 @@ def app(alt_config, config_values, show_config, data_dir):
             service.register_with_app(app)
             assert hasattr(app.services, service.name)
 
-    # stop on every unhandled exception!
-    gevent.get_hub().SYSTEM_ERROR = BaseException  # (KeyboardInterrupt, SystemExit, SystemError)
-
     # start app
     app.start()
 
-    # wait for interupt
+    # wait for interrupt
     evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)
@@ -104,6 +119,81 @@ def app(alt_config, config_values, show_config, data_dir):
 
     # finally stop
     app.stop()
+
+
+@app.command()
+@click.pass_context
+def config(ctx):
+    """Show the config"""
+    konfig.dump_config(ctx.obj['config'])
+
+
+@app.command()
+@click.argument('file', type=click.File(), required=True)
+@click.argument('name', type=str, required=True)
+@click.pass_context
+def blocktest(ctx, file, name):
+    """Start after importing blocks from a file.
+
+    In order to prevent replacement of the local test chain by the main chain from the network, the
+    peermanager, if registered, is stopped before importing any blocks.
+
+    Also, for block tests an in memory database is used. Thus, a already persisting chain stays in
+    place.
+    """
+    app = EthApp(ctx.obj['config'])
+    app.config['db']['implementation'] = 'EphemDB'
+
+    # register services
+    for service in services:
+        assert issubclass(service, BaseService)
+        if service.name not in app.config['deactivated_services']:
+            assert service.name not in app.services
+            service.register_with_app(app)
+            assert hasattr(app.services, service.name)
+
+    if ChainService.name not in app.services:
+        log.fatal('No chainmanager registered')
+        ctx.abort()
+    if DBService.name not in app.services:
+        log.fatal('No db registered')
+        ctx.abort()
+
+    log.info('loading block file', path=file.name)
+    try:
+        data = json.load(file)
+    except ValueError:
+        log.fatal('Invalid JSON file')
+    if name not in data:
+        log.fatal('Name not found in file')
+        ctx.abort()
+    try:
+        blocks = utils.load_block_tests(data.values()[0], app.services.chain.chain.db)
+    except ValueError:
+        log.fatal('Invalid blocks encountered')
+        ctx.abort()
+
+    # start app
+    app.start()
+    if 'peermanager' in app.services:
+        app.services.peermanager.stop()
+
+    log.info('building blockchain')
+    Block.is_genesis = lambda self: self.number == 0
+    app.services.chain.chain._initialize_blockchain(genesis=blocks[0])
+    for block in blocks[1:]:
+        app.services.chain.chain.add_block(block)
+
+    # wait for interrupt
+    evt = Event()
+    gevent.signal(signal.SIGQUIT, evt.set)
+    gevent.signal(signal.SIGTERM, evt.set)
+    gevent.signal(signal.SIGINT, evt.set)
+    evt.wait()
+
+    # finally stop
+    app.stop()
+
 
 if __name__ == '__main__':
     #  python app.py 2>&1 | less +F

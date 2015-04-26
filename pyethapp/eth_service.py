@@ -1,25 +1,53 @@
 # https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
-from ethereum.db import EphemDB
 from ethereum.utils import privtoaddr, sha3
 import rlp
 from rlp.utils import encode_hex
-from ethereum import blocks
 from ethereum import processblock
-from ethereum.miner import Miner
-from blockpool import Synchronizer
+from synchronizer import Synchronizer
 from ethereum.slogging import get_logger
 from ethereum.chain import Chain
+from ethereum.blocks import Block
+from ethereum.transactions import Transaction
 from devp2p.service import WiredService
 import eth_protocol
+import gevent
+import gevent.lock
+from gevent.queue import Queue
 log = get_logger('eth.chainservice')
+
+
+# patch to get context switches between tx replay
+processblock_apply_transaction = processblock.apply_transaction
+
+
+def apply_transaction(block, tx):
+    # import traceback
+    # print traceback.print_stack()
+    log.debug('apply_transaction ctx switch', at=time.time())
+    gevent.sleep(0.001)
+    return processblock_apply_transaction(block, tx)
+processblock.apply_transaction = apply_transaction
 
 
 rlp_hash_hex = lambda data: encode_hex(sha3(rlp.encode(data)))
 
-NUM_BLOCKS_PER_REQUEST = 256  # MAX_GET_CHAIN_REQUEST_BLOCKS
-MAX_GET_CHAIN_REQUEST_BLOCKS = 512
-MAX_GET_CHAIN_SEND_HASHES = 2048
+
+class DuplicatesFilter(object):
+
+    def __init__(self, max_items=128):
+        self.max_items = max_items
+        self.filter = list()
+
+    def known(self, data):
+        if data not in self.filter:
+            self.filter.append(data)
+            if len(self.filter) > self.max_items:
+                self.filter.pop(0)
+            return False
+        else:
+            self.filter.append(self.filter.pop(0))
+            return True
 
 
 class ChainService(WiredService):
@@ -29,7 +57,7 @@ class ChainService(WiredService):
     """
     # required by BaseService
     name = 'chain'
-    default_config = dict(chain=dict(coinbase=privtoaddr(sha3('cow'))))
+    default_config = dict(eth=dict(network_id=0))
 
     # required by WiredService
     wire_protocol = eth_protocol.ETHProtocol  # create for each peer
@@ -37,9 +65,10 @@ class ChainService(WiredService):
     # initialized after configure:
     chain = None
     genesis = None
-    miner = None
     synchronizer = None
     config = None
+    block_queue_size = 1024
+    transaction_queue_size = 1024
 
     def __init__(self, app):
         self.config = app.config
@@ -47,107 +76,104 @@ class ChainService(WiredService):
         assert self.db is not None
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
-        self.chain = Chain(self.db, new_head_cb=self._on_new_head)
-        self.synchronizer = Synchronizer(self.chain)
+        coinbase = app.services.accounts.coinbase
+        self.chain = Chain(self.db, new_head_cb=self._on_new_head, coinbase=coinbase)
+        log.info('chain at', number=self.chain.head.number)
+        self.synchronizer = Synchronizer(self, force_sync=None)
+
+        self.block_queue = Queue(maxsize=self.block_queue_size)
+        self.transaction_queue = Queue(maxsize=self.transaction_queue_size)
+        self.add_blocks_lock = False
+        self.add_transaction_lock = gevent.lock.Semaphore()
+        self.broadcast_filter = DuplicatesFilter()
 
     def _on_new_head(self, block):
-        self.miner = Miner(self.chain.head_candidate)
-        # if we are not syncing, forward all blocks
-        if not self.synchronizer.synchronization_tasks:
-            log.debug("broadcasting new head", block=block)
-            # signals.broadcast_new_block.send(sender=None, block=block)  # FIXME
+        pass
 
-    def loop_body(self):
-        ts = time.time()
-        pct_cpu = self.config['misc']['mining']
-        if pct_cpu > 0:
-            self.mine()
-            delay = (time.time() - ts) * (100. / pct_cpu - 1)
-            assert delay >= 0
-            time.sleep(min(delay, 1.))
+    def add_transaction(self, tx, origin=None):
+        assert isinstance(tx, Transaction)
+        log.debug('add_transaction', locked=self.add_transaction_lock.locked())
+        self.add_transaction_lock.acquire()
+        success = self.chain.add_transaction(tx)
+        self.add_transaction_lock.release()
+        if success:
+            self.broadcast_transaction(tx, origin=origin)  # asap
+
+    def add_block(self, t_block, proto):
+        "adds a block to the block_queue and spawns _add_block if not running"
+        self.block_queue.put((t_block, proto))  # blocks if full
+        if not self.add_blocks_lock:
+            self.add_blocks_lock = True
+            gevent.spawn(self._add_blocks)
+
+    def knows_block(self, block_hash):
+        "if block is in chain or in queue"
+        if block_hash in self.chain:
+            return True
+        # check if queued or processed
+        for i in range(len(self.block_queue.queue)):
+            if block_hash == self.block_queue.queue[i][0].header.hash:
+                return True
+        return False
+
+    def _add_blocks(self):
+        log.debug('add_blocks', qsize=self.block_queue.qsize())
+        try:
+            while not self.block_queue.empty():
+                t_block, proto = self.block_queue.peek()  # peek: knows_block while processing
+                if t_block.header.hash in self.chain:
+                    log.warn('known block', block=t_block)
+                    self.block_queue.get()
+                    continue
+                if t_block.header.prevhash not in self.chain:
+                    log.warn('missing parent', block=t_block)
+                    self.block_queue.get()
+                    continue
+                if not t_block.header.check_pow():
+                    log.warn('invalid pow', block=t_block, FIXME='ban node')
+                    self.block_queue.get()
+                    continue
+                try:  # deserialize
+                    st = time.time()
+                    block = t_block.to_block(db=self.chain.db)
+                    elapsed = time.time() - st
+                    log.debug('deserialized', elapsed='%.2fs' % elapsed,
+                              gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
+                except processblock.InvalidTransaction as e:
+                    log.warn('invalid transaction', block=t_block, error=e, FIXME='ban node')
+                    gevent.sleep(0.001)
+                    continue
+
+                if self.chain.add_block(block):
+                    log.info('added', block=block)
+                self.block_queue.get()
+                gevent.sleep(0.001)
+
+        finally:
+            self.add_blocks_lock = False
+
+    def broadcast_newblock(self, block, chain_difficulty=None, origin=None):
+        if not chain_difficulty:
+            assert block.hash in self.chain
+            chain_difficulty = block.chain_difficulty()
+        assert isinstance(block, (eth_protocol.TransientBlock, Block))
+        if self.broadcast_filter.known(block.header.hash):
+            log.debug('already broadcasted block')
         else:
-            time.sleep(.01)
+            log.debug('broadcasting newblock', origin=origin)
+            bcast = self.app.services.peermanager.broadcast
+            bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
+                  exclude_peers=[origin.peer] if origin else [])
 
-    def mine(self):
-        block = self.miner.mine()
-        if block:
-            # create new block
-            if not self.chain.add_block(block):
-                log.debug("newly mined block is invalid!?", block_hash=block)
-
-    def receive_chain(self, transient_blocks, proto=None):
-        _db = EphemDB()
-        # assuming to receive chain order w/ oldest block first
-        transient_blocks.sort(key=lambda x: x.header.number)
-        assert transient_blocks[0].header.number <= transient_blocks[-1].header.number
-
-        # notify syncer
-        self.synchronizer.received_blocks(proto, transient_blocks)
-
-        for t_block in transient_blocks:  # oldest to newest
-            if t_block.prevhash not in self.chain:
-                log.debug('unknown parent', block=t_block)
-                continue
-
-            log.debug('Checking PoW', block=t_block)
-            if not t_block.header.check_pow(_db):
-                log.debug('Invalid PoW', block=t_block)
-                continue
-            log.debug('Deserializing', block=t_block,
-                      parent=t_block.header.prevhash.encode('hex'), number=t_block.header.number)
-            if t_block.header.prevhash == self.chain.head.hash:
-                log.trace('is child')
-            if t_block.header.prevhash == self.chain.genesis.hash:
-                log.trace('is child of genesis')
-            try:
-                # block = blocks.Block(t_block.header, t_block.transaction_list, t_block.uncles,
-                #                      db=self.chain.db)
-                block = t_block.to_block(db=self.chain.db)
-            except processblock.InvalidTransaction as e:
-                # FIXME there might be another exception in
-                # blocks.deserializeChild when replaying transactions
-                # if this fails, we need to rewind state
-                log.debug('invalid transaction', block=t_block, error=e)
-                # stop current syncing of this chain and skip the child blocks
-                self.synchronizer.stop_synchronization(proto)
-                return
-            except blocks.UnknownParentException:
-                log.debug('unknown parent', block=t_block)
-                if t_block.header.prevhash == blocks.GENESIS_PREVHASH:
-                    log.debug('wrong genesis', block=t_block)
-                    if proto is not None:
-                        proto.send_disconnect(reason='Wrong genesis block')
-                    raise eth_protocol.ETHProtocolError('wrong genesis')
-                else:  # should be a single newly mined block
-                    assert t_block.header.prevhash not in self.chain
-                    if t_block.header.prevhash == self.chain.genesis.hash:
-                        print t_block.serialize().encode('hex')
-                    assert t_block.header.prevhash != self.chain.genesis.hash
-                    log.debug('unknown parent', block=t_block,
-                              parent_hash=encode_hex(t_block.header.prevhash), remote_id=proto)
-                    if len(transient_blocks) != 1:
-                        # strange situation here.
-                        # we receive more than 1 block, so it's not a single newly mined one
-                        # sync/network/... failed to add the needed parent at some point
-                        # well, this happens whenever we can't validate a block!
-                        # we should disconnect!
-                        log.warn(
-                            'blocks received, but unknown parent.', num=len(transient_blocks))
-                    if proto is not None:
-                        # request chain for newest known hash
-                        self.synchronizer.synchronize_unknown_block(
-                            proto, transient_blocks[-1].header.hash)
-                break
-            if block.hash in self.chain:
-                log.debug('known', block=block)
-            else:
-                assert block.has_parent()
-                # assume single block is newly mined block
-                success = self.chain.add_block(block)
-                if success:
-                    log.debug('added', block=block)
-                else:
-                    raise eth_protocol.ETHProtocolError('could not add block')
+    def broadcast_transaction(self, tx, origin=None):
+        assert isinstance(tx, Transaction)
+        if self.broadcast_filter.known(tx.hash):
+            log.debug('already broadcasted tx')
+        else:
+            log.debug('broadcasting tx', origin=origin)
+            bcast = self.app.services.peermanager.broadcast
+            bcast(eth_protocol.ETHProtocol, 'transactions', args=(tx,),
+                  exclude_peers=[origin.peer] if origin else [])
 
     # wire protocol receivers ###########
 
@@ -165,31 +191,36 @@ class ChainService(WiredService):
 
         # send status
         head = self.chain.head
-        proto.send_status(total_difficulty=head.chain_difficulty(), chain_head_hash=head.hash,
+        proto.send_status(chain_difficulty=head.chain_difficulty(), chain_head_hash=head.hash,
                           genesis_hash=self.chain.genesis.hash)
 
     def on_wire_protocol_stop(self, proto):
         assert isinstance(proto, self.wire_protocol)
         log.debug('on_wire_protocol_stop', proto=proto)
 
-    def on_receive_status(self, proto, eth_version, network_id, total_difficulty, chain_head_hash,
+    def on_receive_status(self, proto, eth_version, network_id, chain_difficulty, chain_head_hash,
                           genesis_hash):
 
         log.debug('status received', proto=proto, eth_version=eth_version)
-        assert eth_version == proto.version
-        assert network_id == proto.network_id
+        assert eth_version == proto.version, (eth_version, proto.version)
+        if network_id != self.config['eth'].get('network_id', proto.network_id):
+            log.warn("invalid network id", remote_network_id=network_id,
+                     expected_network_id=self.config['eth'].get('network_id', proto.network_id))
+            raise eth_protocol.ETHProtocolError('wrong network_id')
 
         # check genesis
         if genesis_hash != self.chain.genesis.hash:
+            log.warn("invalid genesis hash", remote_id=proto, genesis=genesis_hash.encode('hex'))
             raise eth_protocol.ETHProtocolError('wrong genesis block')
 
         # request chain
-        self.synchronizer.synchronize_status(proto, chain_head_hash, total_difficulty)
+        self.synchronizer.receive_status(proto, chain_head_hash, chain_difficulty)
 
         # send transactions
-        log.debug("sending transactions", remote_id=proto)
         transactions = self.chain.get_transactions()
-        proto.send_transactions(*transactions)
+        if transactions:
+            log.debug("sending transactions", remote_id=proto)
+            proto.send_transactions(*transactions)
 
     # transactions
 
@@ -197,55 +228,59 @@ class ChainService(WiredService):
         "receives rlp.decoded serialized"
         log.debug('remote_transactions_received', count=len(transactions), remote_id=proto)
         for tx in transactions:
-            # fixme bloomfilter
-            self.chain.add_transaction(tx)
+            self.add_transaction(tx, origin=proto)
 
     # blockhashes ###########
 
     def on_receive_getblockhashes(self, proto, child_block_hash, count):
-        log.debug("handle_get_block_hashes", count=count, block_hash=encode_hex(child_block_hash))
-        max_hashes = min(count, MAX_GET_CHAIN_SEND_HASHES)
+        log.debug("handle_get_blockhashes", count=count, block_hash=encode_hex(child_block_hash))
+        max_hashes = min(count, self.wire_protocol.max_getblockhashes_count)
         found = []
         if child_block_hash not in self.chain:
             log.debug("unknown block")
-            proto.send_blockhashes([])
-        last = self.chain.get(child_block_hash)
+            proto.send_blockhashes(*[])
+            return
+
+        last = child_block_hash
         while len(found) < max_hashes:
-            if last.has_parent():
-                last = last.get_parent()
-                found.append(last.hash)
+            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            if last:
+                found.append(last)
             else:
                 break
+
         log.debug("sending: found block_hashes", count=len(found))
         proto.send_blockhashes(*found)
 
-    def on_receive_blockhashes(self, proto, block_hashes):
-        if block_hashes:
-            log.debug("on_receive_blockhashes", count=len(block_hashes), remote_id=proto,
-                      first=encode_hex(block_hashes[0]), last=encode_hex(block_hashes[-1]))
+    def on_receive_blockhashes(self, proto, blockhashes):
+        if blockhashes:
+            log.debug("on_receive_blockhashes", count=len(blockhashes), remote_id=proto,
+                      first=encode_hex(blockhashes[0]), last=encode_hex(blockhashes[-1]))
         else:
             log.debug("recv 0 remote block hashes, signifying genesis block")
-        self.synchronizer.received_block_hashes(proto, block_hashes)
+        self.synchronizer.receive_blockhashes(proto, blockhashes)
 
     # blocks ################
 
-    def on_receive_getblocks(self, proto, block_hashes):
-        log.debug("on_receive_getblocks", count=len(block_hashes))
+    def on_receive_getblocks(self, proto, blockhashes):
+        log.debug("on_receive_getblocks", count=len(blockhashes))
         found = []
-        for bh in block_hashes[:MAX_GET_CHAIN_REQUEST_BLOCKS]:
-            if bh in self.chain:
-                found.append(self.chain.get(bh))
-            else:
+        for bh in blockhashes[:self.wire_protocol.max_getblocks_count]:
+            try:
+                found.append(self.chain.db.get(bh))
+            except KeyError:
                 log.debug("unknown block requested", block_hash=encode_hex(bh))
-        log.debug("found", count=len(found))
-        proto.send_blocks(*found)
+        if found:
+            log.debug("found", count=len(found))
+            proto.send_blocks(*found)
 
     def on_receive_blocks(self, proto, transient_blocks):
-        log.debug("recv remote blocks", count=len(transient_blocks), remote_id=proto,
-                  highest_number=max(x.header.number for x in transient_blocks))
+        blk_number = max(x.header.number for x in transient_blocks) if transient_blocks else 0
+        log.debug("recv blocks", count=len(transient_blocks), remote_id=proto,
+                  highest_number=blk_number)
         if transient_blocks:
-            self.receive_chain(transient_blocks, proto)
+            self.synchronizer.receive_blocks(proto, transient_blocks)
 
-    def on_receive_newblock(self, proto, block, total_difficulty):
-        log.debug("recv new remote block", block=block, remote_id=proto)
-        self.receive_chain([block], proto)
+    def on_receive_newblock(self, proto, block, chain_difficulty):
+        log.debug("recv newblock", block=block, remote_id=proto)
+        self.synchronizer.receive_newblock(proto, block, chain_difficulty)

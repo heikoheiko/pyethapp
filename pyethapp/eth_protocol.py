@@ -23,7 +23,9 @@ class ETHProtocol(BaseProtocol):
     max_cmd_id = 15  # FIXME
     name = 'eth'
     version = 60
-    network_id = 0
+
+    max_getblocks_count = 256
+    max_getblockhashes_count = 2048
 
     def __init__(self, peer, service):
         # required by P2PProtocol
@@ -45,13 +47,14 @@ class ETHProtocol(BaseProtocol):
         structure = [
             ('eth_version', rlp.sedes.big_endian_int),
             ('network_id', rlp.sedes.big_endian_int),
-            ('total_difficulty', rlp.sedes.big_endian_int),
+            ('chain_difficulty', rlp.sedes.big_endian_int),
             ('chain_head_hash', rlp.sedes.binary),
             ('genesis_hash', rlp.sedes.binary)]
 
-        def create(self, proto, total_difficulty, chain_head_hash, genesis_hash):
+        def create(self, proto, chain_difficulty, chain_head_hash, genesis_hash):
             self.sent = True
-            return [proto.version, proto.network_id, total_difficulty, chain_head_hash, genesis_hash]
+            network_id = proto.service.app.config['eth'].get('network_id', proto.network_id)
+            return [proto.version, network_id, chain_difficulty, chain_head_hash, genesis_hash]
 
     class gettransactions(BaseProtocol.command):
 
@@ -120,9 +123,13 @@ class ETHProtocol(BaseProtocol):
         structure = rlp.sedes.CountableList(Block)
 
         @classmethod
+        def encode_payload(cls, list_of_rlp):
+            return rlp.encode([rlp.codec.RLPData(x) for x in list_of_rlp], infer_serializer=False)
+
+        @classmethod
         def decode_payload(cls, rlp_data):
-            #fn = 'blocks256.hex.rlp'
-            #open(fn, 'w').write(rlp_data.encode('hex'))
+            # fn = 'blocks.fromthewire.hex.rlp'
+            # open(fn, 'a').write(rlp_data.encode('hex') + '\n')
             # convert to dict
             blocks = []
             for block in rlp.decode_lazy(rlp_data):
@@ -138,7 +145,7 @@ class ETHProtocol(BaseProtocol):
         the format described in the main Ethereum specification.
         """
         cmd_id = 7
-        structure = [('block', Block), ('total_difficulty', rlp.sedes.big_endian_int)]
+        structure = [('block', Block), ('chain_difficulty', rlp.sedes.big_endian_int)]
 
         # todo: bloomfilter: so we don't send block to the originating peer
 
@@ -154,23 +161,28 @@ class ETHProtocol(BaseProtocol):
             return dict((cls.structure[i][0], v) for i, v in enumerate(data))
 
 
-class TransientBlock(object):
+class TransientBlock(rlp.Serializable):
 
     """A partially decoded, unvalidated block."""
 
+    fields = [
+        ('header', BlockHeader),
+        ('transaction_list', rlp.sedes.CountableList(Transaction)),
+        ('uncles', rlp.sedes.CountableList(BlockHeader))
+    ]
+
     def __init__(self, block_data):
         self.header = BlockHeader.deserialize(block_data[0])
-        self.transaction_list = block_data[1]
-        self.uncles = block_data[2]
+        self.transaction_list = rlp.sedes.CountableList(Transaction).deserialize(block_data[1])
+        self.uncles = rlp.sedes.CountableList(BlockHeader).deserialize(block_data[2])
 
     def to_block(self, db, parent=None):
         """Convert the transient block to a :class:`ethereum.blocks.Block`"""
-        tx_list = rlp.sedes.CountableList(Transaction).deserialize(self.transaction_list)
-        uncles = rlp.sedes.CountableList(BlockHeader).deserialize(self.uncles)
-        return Block(self.header, tx_list, uncles, db=db, parent=parent)
+        return Block(self.header, self.transaction_list, self.uncles, db=db, parent=parent)
 
-    def serialize(self):
-        return rlp.encode([self.header.serialize(self.header), self.transaction_list, self.uncles])
+    # def serialize(self):
+    # return rlp.encode([self.header.serialize(self.header),
+    # self.transaction_list, self.uncles])
 
     @property
     def hex_hash(self):
