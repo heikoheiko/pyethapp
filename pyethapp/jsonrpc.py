@@ -287,13 +287,13 @@ def address_decoder(data):
     if not data.startswith('0x'):
         data = '0x' + data
     addr = data_decoder(data)
-    if len(addr) != 20:
-        raise BadRequestError('Addresses must be 20 bytes long')
+    if len(addr) not in (20, 0):
+        raise BadRequestError('Addresses must be 20 or 0 bytes long')
     return addr
 
 
 def address_encoder(address):
-    assert len(address) == 20
+    assert len(address) in (20, 0)
     return '0x' + encode_hex(address)
 
 
@@ -800,42 +800,44 @@ class Chain(Subdispatcher):
 
     @public
     def send_Transaction(self, data):
-        # validate transaction
+        """
+        extend spec to support v,r,s signed transactions
+        """
         if not isinstance(data, dict):
             raise BadRequestError('Transaction must be an object')
-        sender = address_decoder(data['from'])
-        try:
-            to = address_decoder(data['to'])
-            creates_contract = False
-        except:
-            to = b'\x00' * 20  # create contract
-            creates_contract = True
-        try:
-            startgas = quantity_decoder(data['gas'])
-        except KeyError:
-            startgas = default_startgas
-        try:
-            gasprice = quantity_decoder(data['gasPrice'])
-        except KeyError:
-            gasprice = default_gasprice
-        try:
-            value = quantity_decoder(data['value'])
-        except KeyError:
-            value = 0
-        try:
-            data_ = data_decoder(data['data'])
-        except KeyError:
-            data_ = b''
 
-        # apply transaction
-        nonce = self.app.services.chain.chain.head_candidate.get_nonce(sender)
-        tx = Transaction(nonce, gasprice, startgas, to, value, data_)
-        assert sender in self.app.services.accounts, 'no account for sender'
-        self.app.services.accounts.sign_tx(sender, tx)
+        def get_data_default(key, decoder, default=None):
+            if key in data:
+                return decoder(data[key])
+            return default
+
+        to = get_data_default('to', address_decoder, b'')
+        startgas = get_data_default('gas', quantity_decoder, default_startgas)
+        gasprice = get_data_default('gasPrice', quantity_decoder, default_gasprice)
+        value = get_data_default('value', quantity_decoder, 0)
+        data_ = get_data_default('data', data_decoder, b'')
+        v = signed = get_data_default('v', quantity_decoder, 0)
+        r = get_data_default('r', quantity_decoder, 0)
+        s = get_data_default('s', quantity_decoder, 0)
+        nonce = get_data_default('nonce', quantity_decoder, None)
+        sender = get_data_default('from', address_decoder, None)
+
+        # create transaction
+        if signed:
+            assert nonce is not None, 'signed but no nonce provided'
+            assert v and r and s
+        else:
+            nonce = self.app.services.chain.chain.head_candidate.get_nonce(sender)
+
+        tx = Transaction(nonce, gasprice, startgas, to, value, data_, v, r, s)
+        if not signed:
+            assert sender in self.app.services.accounts, 'no account for sender'
+            self.app.services.accounts.sign_tx(sender, tx)
         self.app.services.chain.add_transaction(tx, origin=None)
-        print tx.to_dict()
 
-        if creates_contract:
+        log.debug('decoded tx', tx=tx.to_dict())
+
+        if to == b'':  # create
             return address_encoder(processblock.mk_contract_address(tx.sender, nonce))
         else:
             return data_encoder(tx.hash)

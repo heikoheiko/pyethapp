@@ -18,7 +18,8 @@ Intended usage:
 import json
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol
 from tinyrpc.transports.http import HttpPostClientTransport
-from pyethapp.jsonrpc import quantity_encoder, address_encoder, data_encoder, data_decoder
+from pyethapp.jsonrpc import quantity_encoder, quantity_decoder
+from pyethapp.jsonrpc import address_encoder, data_encoder, data_decoder
 from pyethapp.jsonrpc import default_gasprice, default_startgas
 
 
@@ -55,24 +56,62 @@ class JSONRPCClient(object):
                 return block
             i += 1
 
-    def eth_send_Transaction(self, sender=z_address, to=z_address, value=0, data='',
-                             gasprice=default_gasprice, startgas=default_startgas):
-        encoders = dict(sender=address_encoder, to=address_encoder, value=quantity_encoder,
-                        gasprice=quantity_encoder, startgas=quantity_encoder, data=data_encoder)
-        data = {k: encoders[k](v) for k, v in locals().items() if k not in ('self', 'encoders')}
-        data['from'] = data['sender']
-        del data['sender']
+    def eth_send_Transaction(self, nonce=None, sender='', to='', value=0, data='',
+                             gasprice=default_gasprice, startgas=default_startgas,
+                             v=None, r=None, s=None):
+        encoders = dict(nonce=quantity_encoder, sender=address_encoder, to=data_encoder,
+                        value=quantity_encoder, gasprice=quantity_encoder,
+                        startgas=quantity_encoder, data=data_encoder,
+                        v=quantity_encoder, r=quantity_encoder, s=quantity_encoder)
+        data = {k: encoders[k](v) for k, v in locals().items()
+                if k not in ('self', 'encoders') and v is not None}
+        data['from'] = data.pop('sender')
+        assert data.get('from') or (v and r and s)
+
         res = self.call('eth_send_Transaction', data)
         return data_decoder(res)
 
 
 def tx_example():
+    """
+    unsigned txs is signed on the server which needs to know
+    the secret key associated with the sending account
+    it can be added in the config
+    """
+    from pyethapp.accounts import mk_privkey, privtoaddr
+    secret_seed = 'wow'
+    sender = privtoaddr(mk_privkey(secret_seed))
+    res = JSONRPCClient().eth_send_Transaction(sender=sender, to=z_address, value=1000)
+    if len(res) == 20:
+        print 'contract created @', res.encode('hex')
+    else:
+        assert len(res) == 32
+        print 'tx hash', res.encode('hex')
+
+
+def signed_tx_example():
+    from ethereum.transactions import Transaction
     from pyethapp.accounts import mk_privkey, privtoaddr
     secret_seed = 'wow'
     privkey = mk_privkey(secret_seed)
     sender = privtoaddr(privkey)
-    res = JSONRPCClient().eth_send_Transaction(sender=sender, to=z_address, value=1000)
-    print 'tx hash', res.encode('hex')
+    # fetch nonce
+    nonce = quantity_decoder(
+        JSONRPCClient().call('eth_getTransactionCount', address_encoder(sender), 'pending'))
+    # create transaction
+    tx = Transaction(nonce, default_gasprice, default_startgas, to=z_address, value=100, data='')
+    tx.sign(privkey)
+    tx_dict = tx.to_dict()
+    tx_dict.pop('hash')
+    res = JSONRPCClient().eth_send_Transaction(**tx_dict)
+    if len(res) == 20:
+        print 'contract created @', res.encode('hex')
+    else:
+        assert len(res) == 32
+        print 'tx hash', res.encode('hex')
+
 
 if __name__ == '__main__':
     call = JSONRPCClient()
+    # signed_tx_example()
+    # tx_example()
