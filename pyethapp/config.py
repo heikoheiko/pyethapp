@@ -16,18 +16,14 @@ todo:
 
 
 """
-import random
 import os
-import sys
 import click
 from devp2p.utils import update_config_with_defaults
 import yaml
 import ethereum.slogging as slogging
-from importlib import import_module
-import inspect
 from devp2p.service import BaseService
 from devp2p.app import BaseApp
-
+from accounts import mk_random_privkey
 
 slogging.configure(config_string=':debug')
 log = slogging.get_logger('config')
@@ -47,7 +43,7 @@ def setup_data_dir(data_dir=None):
         setup_required_config(data_dir)
 
 
-required_config = dict(node=dict(privkey_hex=''), eth=dict(privkey_hex=''))
+required_config = dict(node=dict(privkey_hex=''), accounts=dict(privkeys_hex=[]))
 
 
 def check_config(config, required_config=required_config):
@@ -61,21 +57,14 @@ def check_config(config, required_config=required_config):
     return True
 
 
-def mk_privkey_hex():
-    k = hex(random.getrandbits(256))[2:-1].zfill(64)
-    assert len(k) == 64
-    assert k.decode('hex')
-    return k
-
-
 def setup_required_config(data_dir=default_data_dir):
     "writes minimal necessary config to data_dir"
     log.info('setup default config', path=data_dir)
     config_path = get_config_path(data_dir)
     assert not os.path.exists(config_path)
     setup_data_dir(data_dir)
-    config = dict(node=dict(privkey_hex=mk_privkey_hex()),
-                  eth=dict(privkey_hex=mk_privkey_hex()))
+    config = dict(node=dict(privkey_hex=mk_random_privkey().encode('hex')),
+                  accounts=dict(privkeys_hex=[mk_random_privkey().encode('hex')]))
     write_config(config, config_path)
 
 
@@ -89,12 +78,26 @@ def get_default_config(services):
     return config
 
 
+def _fix_accounts(path):
+    config = yaml.load(open(path))
+    eth_key = config.get('eth', {}).get('privkey_hex')
+    if eth_key:
+        print 'fixing config', path
+        del config['eth']['privkey_hex']
+        if not config['eth']:
+            del config['eth']
+        assert 'accounts' not in config
+        config['accounts'] = dict(privkeys_hex=[eth_key])
+        write_config(config)
+
+
 def load_config(path=default_config_path):
     """Load config from string or file like object `path`."""
     log.info('loading config', path=path)
     if os.path.exists(path):
         if os.path.isdir(path):
             path = get_config_path(path)
+        _fix_accounts(path)  # FIXME
         return yaml.load(open(path))
     return dict()
 
@@ -138,28 +141,3 @@ def set_config_param(config, s, strict=True):
 
 def dump_config(config):
     print yaml.dump(config)
-
-
-"""
-if os.path.exists(config_path):
-    with open(config_path) as f:
-        load_config(f)
-else:
-    load_config(default_config)
-    pubkey = crypto.privtopub(config['p2p']['privkey_hex'].decode('hex'))
-    config['app']['dir'] = config_directory
-    config['p2p']['node_id'] = crypto.sha3(pubkey)
-    config['app']['contrib_dirs'].append(contrib_directory)
-    # problem with the following code: default config specified here is
-    # ignored if config file already exists -> annoying for development with
-    # frequently changing default config. Also: comments are discarded
-#   try:
-#       os.makedirs(config_directory)
-#   except OSError as exc:
-#       if exc.errno == errno.EEXIST:
-#           pass
-#       else:
-#           raise
-#   with open(config_path, 'wb') as f:
-#       yaml.dump(config, f)
-"""

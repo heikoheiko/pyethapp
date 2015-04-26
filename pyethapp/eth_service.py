@@ -57,7 +57,7 @@ class ChainService(WiredService):
     """
     # required by BaseService
     name = 'chain'
-    default_config = dict(eth=dict(privkey_hex='', network_id=0))
+    default_config = dict(eth=dict(network_id=0))
 
     # required by WiredService
     wire_protocol = eth_protocol.ETHProtocol  # create for each peer
@@ -76,7 +76,7 @@ class ChainService(WiredService):
         assert self.db is not None
         super(ChainService, self).__init__(app)
         log.info('initializing chain')
-        coinbase = privtoaddr(self.config['eth']['privkey_hex'].decode('hex'))
+        coinbase = app.services.accounts.coinbase
         self.chain = Chain(self.db, new_head_cb=self._on_new_head, coinbase=coinbase)
         log.info('chain at', number=self.chain.head.number)
         self.synchronizer = Synchronizer(self, force_sync=None)
