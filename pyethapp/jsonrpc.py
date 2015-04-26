@@ -20,9 +20,15 @@ from tinyrpc.server.gevent import RPCServerGreenlets
 from tinyrpc.transports.wsgi import WsgiServerTransport
 from devp2p.service import BaseService
 from eth_protocol import ETHProtocol
+from ethereum.utils import denoms
 
 log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
+
+# defaults
+default_startgas = 100 * 1000
+default_gasprice = 100 * 1000 * denoms.wei
+
 
 # route logging messages
 
@@ -45,7 +51,13 @@ gevent.wsgi.WSGIHandler.log_error = WSGIServerLogger.log_error
 
 # hack to return the correct json rpc error code if the param count is wrong
 # (see https://github.com/mbr/tinyrpc/issues/19)
+
+public_methods = dict()
+
+
 def public(f):
+    public_methods[f.__name__] = inspect.getargspec(f)
+
     def new_f(*args, **kwargs):
         try:
             inspect.getcallargs(f, *args, **kwargs)
@@ -102,6 +114,10 @@ class JSONRPCServer(BaseService):
     name = 'jsonrpc'
     default_config = dict(jsonrpc=dict(listen_port=4000, listen_host='127.0.0.1'))
 
+    @classmethod
+    def subdispatcher_classes(cls):
+        return (Web3, Net, Compilers, DB, Chain, Miner, FilterManager)
+
     def __init__(self, app):
         log.debug('initializing JSONRPCServer')
         BaseService.__init__(self, app)
@@ -109,7 +125,7 @@ class JSONRPCServer(BaseService):
 
         self.dispatcher = LoggingDispatcher()
         # register sub dispatchers
-        for subdispatcher in (Web3, Net, Compilers, DB, Chain, Miner, FilterManager):
+        for subdispatcher in self.subdispatcher_classes():
             subdispatcher.register(self)
 
         transport = WsgiServerTransport(queue_class=gevent.queue.Queue)
@@ -783,6 +799,48 @@ class Chain(Subdispatcher):
         return b'\x00' * 20
 
     @public
+    def send_Transaction(self, data):
+        # validate transaction
+        if not isinstance(data, dict):
+            raise BadRequestError('Transaction must be an object')
+        sender = address_decoder(data['from'])
+        try:
+            to = address_decoder(data['to'])
+            creates_contract = False
+        except:
+            to = b'\x00' * 20  # create contract
+            creates_contract = True
+        try:
+            startgas = quantity_decoder(data['gas'])
+        except KeyError:
+            startgas = default_startgas
+        try:
+            gasprice = quantity_decoder(data['gasPrice'])
+        except KeyError:
+            gasprice = default_gasprice
+        try:
+            value = quantity_decoder(data['value'])
+        except KeyError:
+            value = 0
+        try:
+            data_ = data_decoder(data['data'])
+        except KeyError:
+            data_ = b''
+
+        # apply transaction
+        nonce = self.app.services.chain.chain.head_candidate.get_nonce(sender)
+        tx = Transaction(nonce, gasprice, startgas, to, value, data_)
+        assert sender in self.app.services.accounts, 'no account for sender'
+        self.app.services.accounts.sign_tx(sender, tx)
+        self.app.services.chain.add_transaction(tx, origin=None)
+        print tx.to_dict()
+
+        if creates_contract:
+            return address_encoder(processblock.mk_contract_address(tx.sender, nonce))
+        else:
+            return data_encoder(tx.hash)
+
+    @public
     @decode_arg('block_id', block_id_decoder)
     @encode_res(data_encoder)
     def call(self, data, block_id=None):
@@ -827,15 +885,18 @@ class Chain(Subdispatcher):
             sender = address_decoder(data['from'])
         except KeyError:
             sender = '\x00' * 20
+
         # apply transaction
         nonce = test_block.get_nonce(sender)
         tx = Transaction(nonce, gasprice, startgas, to, value, data_)
         tx.sender = sender
+
         try:
             success, output = processblock.apply_transaction(test_block, tx)
-        except processblock.InvalidTransaction:
+        except processblock.InvalidTransaction as e:
             success = False
         assert block.state_root == state_root_before
+
         if success:
             return output
         else:
@@ -1015,3 +1076,26 @@ class FilterManager(Subdispatcher):
             return [None] * len(filter_.logs)
         else:
             return self.filters[id_].logs
+
+
+if __name__ == '__main__':
+    import inspect
+    from devp2p.app import BaseApp
+
+    # deactivate service availability check
+    for cls in JSONRPCServer.subdispatcher_classes():
+        cls.required_services = []
+
+    app = BaseApp(JSONRPCServer.default_config)
+    jrpc = JSONRPCServer(app)
+    dispatcher = jrpc.dispatcher
+
+    def show_methods(dispatcher, prefix=''):
+        # https://github.com/micheles/decorator/blob/3.4.1/documentation.rst
+        for name, method in dispatcher.method_map.items():
+            print prefix + name, inspect.formatargspec(public_methods[name])
+        for sub_prefix, subdispatcher_list in dispatcher.subdispatchers.items():
+            for sub in subdispatcher_list:
+                show_methods(sub, prefix + sub_prefix)
+
+    show_methods(dispatcher)
