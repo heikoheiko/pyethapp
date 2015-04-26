@@ -95,7 +95,7 @@ class ChainService(WiredService):
         success = self.chain.add_transaction(tx)
         self.add_transaction_lock.release()
         if success:
-            self.broadcast_transaction(tx, origin=None)  # send as fast as possible
+            self.broadcast_transaction(tx, origin=origin)  # send as fast as possible
 
     def add_block(self, t_block, proto):
         "adds a block to the block_queue and spawns _add_block if not running"
@@ -128,8 +128,7 @@ class ChainService(WiredService):
                     self.block_queue.get()
                     continue
                 if not t_block.header.check_pow():
-                    log.warn('invalid pow', block=t_block)
-                    # FIXME ban node
+                    log.warn('invalid pow', block=t_block, FIXME='ban node')
                     self.block_queue.get()
                     continue
                 try:  # deserialize
@@ -139,9 +138,8 @@ class ChainService(WiredService):
                     log.debug('deserialized', elapsed='%.2fs' % elapsed,
                               gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
                 except processblock.InvalidTransaction as e:
-                    log.warn('invalid transaction', block=t_block, error=e)
+                    log.warn('invalid transaction', block=t_block, error=e, FIXME='ban node')
                     gevent.sleep(0.001)
-                    # FIXME ban node
                     continue
 
                 if self.chain.add_block(block):
@@ -163,7 +161,7 @@ class ChainService(WiredService):
             log.debug('broadcasting newblock', origin=origin)
             bcast = self.app.services.peermanager.broadcast
             bcast(eth_protocol.ETHProtocol, 'newblock', args=(block, chain_difficulty),
-                  exclude_peers=[origin.peer])
+                  exclude_peers=[origin.peer] if origin else [])
 
     def broadcast_transaction(self, tx, origin=None):
         assert isinstance(tx, Transaction)
@@ -173,7 +171,7 @@ class ChainService(WiredService):
             log.debug('broadcasting tx', origin=origin)
             bcast = self.app.services.peermanager.broadcast
             bcast(eth_protocol.ETHProtocol, 'transactions', args=(tx,),
-                  exclude_peers=[origin.peer])
+                  exclude_peers=[origin.peer] if origin else [])
 
     # wire protocol receivers ###########
 
