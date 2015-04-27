@@ -1,4 +1,6 @@
+#
 ## Builds pyethapp from GitHub in a python 2.7.9 docker container.
+## Note: base image, do not use in a production environment
 ##
 ## Build with:
 #
