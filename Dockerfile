@@ -7,7 +7,7 @@
 ##
 ## Run with:
 # 
-# docker run -p 30303:30303 -p 30303:30303/udp -v <host dir>:/data pyethapp
+# docker run -p 30303:30303 -p 30303:30303/udp pyethapp
 #
 
 FROM python:2.7.9
@@ -37,7 +37,5 @@ RUN pip install -e .
 # (e.g. https://github.com/hypothesis/h/issues/1704#issuecomment-63893295):
 RUN sed -i 's/PROTOCOL_SSLv3/PROTOCOL_SSLv23/g' /usr/local/lib/python2.7/site-packages/gevent/ssl.py
 
-CMD ["-d", "/data/pyethdata", "run"]
+CMD ["run"]
 ENTRYPOINT ["pyethapp"]
-
-VOLUME ["/data"]
