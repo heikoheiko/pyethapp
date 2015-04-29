@@ -69,6 +69,8 @@ class ChainService(WiredService):
     config = None
     block_queue_size = 1024
     transaction_queue_size = 1024
+    processed_gas = 0
+    processed_elapsed = 0
 
     def __init__(self, app):
         self.config = app.config
@@ -103,7 +105,7 @@ class ChainService(WiredService):
         "adds a block to the block_queue and spawns _add_block if not running"
         self.block_queue.put((t_block, proto))  # blocks if full
         if not self.add_blocks_lock:
-            self.add_blocks_lock = True
+            self.add_blocks_lock = True  # need to lock here (ctx switch is later)
             gevent.spawn(self._add_blocks)
 
     def knows_block(self, block_hash):
@@ -141,7 +143,7 @@ class ChainService(WiredService):
                     block = t_block.to_block(db=self.chain.db)
                     elapsed = time.time() - st
                     log.debug('deserialized', elapsed='%.2fs' % elapsed,
-                              gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
+                              gas_used=block.gas_used, gpsec=self.gpsec(block.gas_used, elapsed))
                 except processblock.InvalidTransaction as e:
                     log.warn('invalid transaction', block=t_block, error=e, FIXME='ban node')
                     self.block_queue.get()
@@ -157,6 +159,12 @@ class ChainService(WiredService):
                 gevent.sleep(0.001)
         finally:
             self.add_blocks_lock = False
+            self.add_transaction_lock.release()
+
+    def gpsec(self, gas_spent=0, elapsed=0):
+        self.processed_gas += gas_spent
+        self.processed_elapsed += elapsed
+        return int(self.processed_gas / (0.001 + self.processed_elapsed))
 
     def broadcast_newblock(self, block, chain_difficulty=None, origin=None):
         if not chain_difficulty:
