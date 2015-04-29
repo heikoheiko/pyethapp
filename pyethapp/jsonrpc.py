@@ -22,7 +22,7 @@ from devp2p.service import BaseService
 from eth_protocol import ETHProtocol
 from ethereum.utils import denoms
 
-log = slogging.get_logger('jsonrpc')
+logger = log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
 
 # defaults
@@ -259,14 +259,11 @@ def data_decoder(data):
     if not data.startswith('0x'):
         data = '0x' + data
     if len(data) % 2 != 0:
-        success = False  # must be even length
-    else:
-        try:
-            return decode_hex(data[2:])
-        except TypeError:
-            success = False
-    assert not success
-    raise BadRequestError('Invalid data encoding')
+        raise BadRequestError('Invalid data encoding, must be even length')
+    try:
+        return decode_hex(data[2:])
+    except TypeError:
+        raise BadRequestError('Invalid data hex encoding', data[2:])
 
 
 def data_encoder(data, length=None):
@@ -284,8 +281,6 @@ def data_encoder(data, length=None):
 
 def address_decoder(data):
     """Decode an address from hex with 0x prefix to 20 bytes."""
-    if not data.startswith('0x'):
-        data = '0x' + data
     addr = data_decoder(data)
     if len(addr) not in (20, 0):
         raise BadRequestError('Addresses must be 20 or 0 bytes long')
@@ -543,7 +538,7 @@ class Miner(Subdispatcher):
     @public
     @encode_res(address_encoder)
     def coinbase(self):
-        return '\x00' * 20
+        return self.app.services.accounts.coinbase
 
     @public
     @encode_res(quantity_encoder)
@@ -552,7 +547,7 @@ class Miner(Subdispatcher):
 
     @public
     def accounts(self):
-        return [address_encoder(addr) for addr in ['\x00' * 20]]
+        return [address_encoder(account.address) for account in self.app.services.accounts]
 
 
 class DB(Subdispatcher):
@@ -796,10 +791,10 @@ class Chain(Subdispatcher):
     @public
     @encode_res(data_encoder)
     def coinbase(self):
-        return b'\x00' * 20
+        return self.app.services.accounts.coinbase
 
     @public
-    def send_Transaction(self, data):
+    def sendTransaction(self, data):
         """
         extend spec to support v,r,s signed transactions
         """
@@ -820,7 +815,7 @@ class Chain(Subdispatcher):
         r = get_data_default('r', quantity_decoder, 0)
         s = get_data_default('s', quantity_decoder, 0)
         nonce = get_data_default('nonce', quantity_decoder, None)
-        sender = get_data_default('from', address_decoder, None)
+        sender = get_data_default('from', address_decoder, self.app.services.accounts.coinbase)
 
         # create transaction
         if signed:
@@ -940,6 +935,9 @@ class Filter(object):
         self._logs = {}
         self._new_logs = {}
 
+    def __repr__(self):
+        return '<Filter(addresses=%r, topics=%r)>' % (self.addresses, self.topics)
+
     def check(self):
         """Check for new logs."""
         blocks_to_check = [block for block in self.blocks if block not in self.blocks_done]
@@ -948,10 +946,13 @@ class Filter(object):
         if self.latest:
             blocks_to_check.append(self.chain.head)
         # go through all receipts of all blocks
+        logger.debug('blocks to check', blocks=blocks_to_check)
         for block in blocks_to_check:
             receipts = block.get_receipts()
+            logger.debug('receipts', block=block, receipts=receipts)
             for receipt in receipts:
                 for i, log in enumerate(receipt.logs):
+                    logger.debug('log', log=log, topics=self.topics)
                     if self.topics is not None:
                         # compare topics one by one
                         topic_match = True
@@ -966,6 +967,7 @@ class Filter(object):
                     if self.addresses is not None and log.address not in self.addresses:
                         continue
                     # still here, so match was successful => add to log list
+                    assert False, 'we never find filters!'
                     id_ = ethereum.utils.sha3rlp(log)
                     self._logs[id_] = (log, i, block)
                     self._new_logs[id_] = (log, i, block)
@@ -999,12 +1001,10 @@ class FilterManager(Subdispatcher):
     def newFilter(self, filter_dict):
         if not isinstance(filter_dict, dict):
             raise BadRequestError('Filter must be an object')
-        required_keys = set(['fromBlock', 'toBlock'])
-        if not required_keys.issubset(set(filter_dict.keys())):
-            raise BadRequestError('Invalid filter object')
-
-        b0 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['fromBlock']))
-        b1 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['toBlock']))
+        b0 = self.json_rpc_server.get_block(
+            block_id_decoder(filter_dict.get('fromBlock', 'latest')))
+        b1 = self.json_rpc_server.get_block(
+            block_id_decoder(filter_dict.get('toBlock', 'latest')))
         if b1.number < b0.number:
             raise BadRequestError('fromBlock must be prior or equal to toBlock')
         address = filter_dict.get('address', None)
@@ -1062,9 +1062,11 @@ class FilterManager(Subdispatcher):
         if id_ not in self.filters:
             raise BadRequestError('Unknown filter')
         filter_ = self.filters[id_]
+        logger.debug('filter found', filter=filter_, pending=filter_.pending, latest=filter_.latest)
         if filter_.pending or filter_.latest:
             return [None] * len(filter_.new_logs)
         else:
+            self.filters[id_].check()  # FIXME (on block update only?)
             return self.filters[id_].new_logs
 
     @public

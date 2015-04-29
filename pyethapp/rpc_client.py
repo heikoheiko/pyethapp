@@ -19,7 +19,7 @@ import json
 from tinyrpc.protocols.jsonrpc import JSONRPCProtocol
 from tinyrpc.transports.http import HttpPostClientTransport
 from pyethapp.jsonrpc import quantity_encoder, quantity_decoder
-from pyethapp.jsonrpc import address_encoder, data_encoder, data_decoder
+from pyethapp.jsonrpc import address_encoder, data_encoder, data_decoder, address_decoder
 from pyethapp.jsonrpc import default_gasprice, default_startgas
 
 
@@ -56,9 +56,9 @@ class JSONRPCClient(object):
                 return block
             i += 1
 
-    def eth_send_Transaction(self, nonce=None, sender='', to='', value=0, data='',
-                             gasprice=default_gasprice, startgas=default_startgas,
-                             v=None, r=None, s=None):
+    def eth_sendTransaction(self, nonce=None, sender='', to='', value=0, data='',
+                            gasprice=default_gasprice, startgas=default_startgas,
+                            v=None, r=None, s=None):
         encoders = dict(nonce=quantity_encoder, sender=address_encoder, to=data_encoder,
                         value=quantity_encoder, gasprice=quantity_encoder,
                         startgas=quantity_encoder, data=data_encoder,
@@ -68,7 +68,7 @@ class JSONRPCClient(object):
         data['from'] = data.pop('sender')
         assert data.get('from') or (v and r and s)
 
-        res = self.call('eth_send_Transaction', data)
+        res = self.call('eth_sendTransaction', data)
         return data_decoder(res)
 
 
@@ -81,7 +81,7 @@ def tx_example():
     from pyethapp.accounts import mk_privkey, privtoaddr
     secret_seed = 'wow'
     sender = privtoaddr(mk_privkey(secret_seed))
-    res = JSONRPCClient().eth_send_Transaction(sender=sender, to=z_address, value=1000)
+    res = JSONRPCClient().eth_sendTransaction(sender=sender, to=z_address, value=1000)
     if len(res) == 20:
         print 'contract created @', res.encode('hex')
     else:
@@ -103,7 +103,7 @@ def signed_tx_example():
     tx.sign(privkey)
     tx_dict = tx.to_dict()
     tx_dict.pop('hash')
-    res = JSONRPCClient().eth_send_Transaction(**tx_dict)
+    res = JSONRPCClient().eth_sendTransaction(**tx_dict)
     if len(res) == 20:
         print 'contract created @', res.encode('hex')
     else:
