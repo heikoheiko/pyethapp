@@ -30,6 +30,7 @@ class Account(object):
     def address(self):
         a = privtoaddr(self.privkey)
         assert len(a) == 20
+        assert isinstance(a, bytes)
         return a
 
     def __repr__(self):
