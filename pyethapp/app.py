@@ -46,8 +46,10 @@ class EthApp(BaseApp):
               help='data directory')
 @click.option('log_config', '--log_config', '-l', multiple=False, type=str,
               help='log_config string: e.g. ":info,eth:debug')
+@click.option('bootstrap_node', '--bootstrap_node', '-b', multiple=False, type=str,
+              help='single bootstrap_node as enode://pubkey@host:port')
 @click.pass_context
-def app(ctx, alt_config, config_values, data_dir, log_config):
+def app(ctx, alt_config, config_values, data_dir, log_config, bootstrap_node):
 
     # configure logging
     log_config = log_config or ':info'
@@ -79,6 +81,9 @@ def app(ctx, alt_config, config_values, data_dir, log_config):
             raise BadParameter('Config parameter must be of the form "a.b.c=d" where "a.b.c" '
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
+    if bootstrap_node:
+        config['discovery']['bootrap_nodes'] = [bootstrap_node]
+
     ctx.obj = {'config': config}
 
 

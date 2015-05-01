@@ -257,7 +257,7 @@ class ChainService(WiredService):
 
         last = child_block_hash
         while len(found) < max_hashes:
-            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]  # FIXME, got a KeyError here?!
             if last:
                 found.append(last)
             else:
