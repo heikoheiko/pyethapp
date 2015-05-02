@@ -39,9 +39,11 @@ install_requires = [install_requires_replacements.get(r, r) for r in install_req
 
 test_requirements = []
 
+version = '0.9.13'  # preserve format, this is read from __init__.py
+
 setup(
     name='pyethapp',
-    version='0.1.3',
+    version=version,
     description="Python Ethereum Client",
     long_description=readme + '\n\n' + history,
     author="HeikoHeiko",
