@@ -100,10 +100,14 @@ class SyncTask(object):
                 if not blockhashes_batch:
                     log_st.warn('empty getblockhashes result')
                     continue
+                if not isinstance(blockhashes_batch[0], bytes):
+                    log_st.warn('got wrong data type', expected='bytes',
+                                received=type(blockhashes_batch[0]))
+                    continue
                 break
 
             for blockhash in blockhashes_batch:  # youngest to oldest
-                assert isinstance(blockhash, str)
+                assert isinstance(blockhash, bytes)
                 if blockhash not in self.chain:
                     blockhashes_chain.append(blockhash)
                 else:
