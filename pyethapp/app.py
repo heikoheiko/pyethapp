@@ -46,14 +46,16 @@ class EthApp(BaseApp):
               help='data directory')
 @click.option('log_config', '--log_config', '-l', multiple=False, type=str,
               help='log_config string: e.g. ":info,eth:debug')
+@click.option('--log-json/--log-no-json', default=False,
+              help='log as structured json output')
 @click.option('bootstrap_node', '--bootstrap_node', '-b', multiple=False, type=str,
               help='single bootstrap_node as enode://pubkey@host:port')
 @click.pass_context
-def app(ctx, alt_config, config_values, data_dir, log_config, bootstrap_node):
+def app(ctx, alt_config, config_values, data_dir, log_config, bootstrap_node, log_json):
 
     # configure logging
     log_config = log_config or ':info'
-    slogging.configure(log_config)
+    slogging.configure(log_config, log_json=log_json)
 
     # data dir default or from cli option
     data_dir = data_dir or konfig.default_data_dir
