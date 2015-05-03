@@ -257,7 +257,13 @@ class ChainService(WiredService):
 
         last = child_block_hash
         while len(found) < max_hashes:
-            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]  # FIXME, got a KeyError here?!
+            try:
+                last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            except KeyError:
+                # this can happen if we started a chain download, which did not complete
+                # should not happen if the hash is part of the canonical chain
+                log.warn('KeyError in getblockhashes', hash=last)
+                break
             if last:
                 found.append(last)
             else:

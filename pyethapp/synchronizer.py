@@ -3,6 +3,7 @@ import gevent
 import time
 from eth_protocol import TransientBlock
 from ethereum.slogging import get_logger
+import traceback
 
 log = get_logger('eth.sync')
 log_st = get_logger('eth.sync.task')
@@ -43,13 +44,9 @@ class SyncTask(object):
         log_st.info('spawning new syntask')
         try:
             self.fetch_hashchain()
-        except Exception as e:
+        except Exception:
+            print(traceback.format_exc())
             self.exit(success=False)
-            raise e
-
-    def run(self):
-        log_st.info('spawning new syntask')
-        self.fetch_hashchain()
 
     def exit(self, success=False):
         if not success:
@@ -100,7 +97,7 @@ class SyncTask(object):
                 if not blockhashes_batch:
                     log_st.warn('empty getblockhashes result')
                     continue
-                if not isinstance(blockhashes_batch[0], bytes):
+                if not all(isinstance(bh, bytes) for bh in blockhashes_batch):
                     log_st.warn('got wrong data type', expected='bytes',
                                 received=type(blockhashes_batch[0]))
                     continue
