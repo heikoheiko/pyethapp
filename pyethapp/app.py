@@ -84,7 +84,7 @@ def app(ctx, alt_config, config_values, data_dir, log_config, bootstrap_node, lo
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
     if bootstrap_node:
-        config['discovery']['bootrap_nodes'] = [bootstrap_node]
+        config['discovery']['bootstrap_nodes'] = [bytes(bootstrap_node)]
 
     ctx.obj = {'config': config}
 
@@ -105,6 +105,9 @@ def run(ctx, dev):
         except:
             log.warn("can't get and add login name to client_version")
             pass
+
+    # dump config
+    konfig.dump_config(ctx.obj['config'])
 
     # register services
     for service in services:

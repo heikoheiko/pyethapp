@@ -134,6 +134,7 @@ class ChainService(WiredService):
                     log.warn('missing parent', block=t_block)
                     self.block_queue.get()
                     continue
+                # FIXME, this is also done in validation and in synchronizer for new_blocks
                 if not t_block.header.check_pow():
                     log.warn('invalid pow', block=t_block, FIXME='ban node')
                     self.block_queue.get()
@@ -142,7 +143,7 @@ class ChainService(WiredService):
                     st = time.time()
                     block = t_block.to_block(db=self.chain.db)
                     elapsed = time.time() - st
-                    log.debug('deserialized', elapsed='%.2fs' % elapsed,
+                    log.debug('deserialized', elapsed='%.4fs' % elapsed,
                               gas_used=block.gas_used, gpsec=self.gpsec(block.gas_used, elapsed))
                 except processblock.InvalidTransaction as e:
                     log.warn('invalid transaction', block=t_block, error=e, FIXME='ban node')
@@ -154,7 +155,7 @@ class ChainService(WiredService):
                     continue
 
                 if self.chain.add_block(block):
-                    log.info('added', block=block)
+                    log.info('added', block=block, ts=time.time())
                 self.block_queue.get()  # remove block from queue (we peeked only)
                 gevent.sleep(0.001)
         finally:
