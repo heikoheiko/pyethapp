@@ -1,3 +1,4 @@
+import time
 from copy import deepcopy
 from decorator import decorator
 from collections import Iterable
@@ -28,6 +29,14 @@ slogging.configure(config_string=':debug')
 # defaults
 default_startgas = 100 * 1000
 default_gasprice = 100 * 1000 * denoms.wei
+
+
+def _fail_on_error_dispatch(self, request):
+    method = self.get_method(request.method)
+    # we found the method
+    result = method(*request.args, **request.kwargs)
+    return request.respond(result)
+RPCDispatcher._dispatch = _fail_on_error_dispatch
 
 
 # route logging messages
@@ -92,9 +101,9 @@ class LoggingDispatcher(RPCDispatcher):
         else:
             response_list = [response]
         for res in response_list:
-            try:
+            if hasattr(res, 'result'):
                 self.logger('RPC result', id=res.unique_id, result=res.result)
-            except AttributeError:
+            else:
                 self.logger('RPC error', id=res.unique_id, error=res.error)
         return response
 
@@ -940,7 +949,7 @@ class Filter(object):
 
     def check(self):
         """Check for new logs."""
-        blocks_to_check = [block for block in self.blocks if block not in self.blocks_done]
+        blocks_to_check = self.blocks[:]
         if self.pending:
             blocks_to_check.append(self.chain.head_candidate)
         if self.latest:
@@ -948,6 +957,8 @@ class Filter(object):
         # go through all receipts of all blocks
         logger.debug('blocks to check', blocks=blocks_to_check)
         for block in blocks_to_check:
+            if block in self.blocks_done:
+                continue
             receipts = block.get_receipts()
             logger.debug('receipts', block=block, receipts=receipts)
             for receipt in receipts:
@@ -982,9 +993,52 @@ class Filter(object):
 
     @property
     def new_logs(self):
+        self.check()
         ret = self._new_logs.copy()
         self._new_logs = {}
         return ret.values()
+
+
+class NewBlockFilter(object):
+
+    """A filter for new blocks.
+    :ivar pending: if `True` also look for logs from the current pending block
+    :ivar latest: if `True` also look for logs from the current head
+    :ivar blocks_done: a list of blocks that don't have to be searched again
+    """
+
+    def __init__(self, chainservice, pending=False, latest=False):
+        self.chainservice = chainservice
+        self.blocks_done = set()
+        assert latest or pending
+        self.pending = pending
+        self.latest = latest
+        self.new_block_event = gevent.event.Event()
+        self._new_block_cb = lambda b: self.new_block_event.set()
+        self.chainservice.on_new_head_cbs.append(self._new_block_cb)
+
+    def __repr__(self):
+        return '<NewBlockFilter(latest=%r, pending=%r)>' % (self.latest, self.pending)
+
+    def __del__(self):
+        self.chainservice.on_new_head_cbs.remove(self._new_block_cb)
+
+    def check(self):
+        "returns changed block or None"
+        if self.pending:
+            block = self.chainservice.chain.head_candidate
+        else:
+            block = self.chainservice.chain.head
+        if block not in self.blocks_done:
+            self.blocks_done.add(block)
+            return block
+        # wait for event
+        if self.new_block_event.is_set():
+            self.new_block_event.clear()
+        log.debug('NewBlockFilter, waiting for event', ts=time.time())
+        if self.new_block_event.wait(timeout=0.9):
+            log.debug('NewBlockFilter, got new_block event', ts=time.time())
+            return self.check()
 
 
 class FilterManager(Subdispatcher):
@@ -1041,7 +1095,7 @@ class FilterManager(Subdispatcher):
             raise JSONRPCInvalidParamsError('Parameter must be either "latest" or "pending"')
         pending = (s == 'pending')
         latest = (s == 'latest')
-        filter_ = Filter(self.chain.chain, pending=pending, latest=latest)
+        filter_ = NewBlockFilter(self.chain, pending=pending, latest=latest)
         self.filters[self.next_id] = filter_
         self.next_id += 1
         return self.next_id - 1
@@ -1057,17 +1111,22 @@ class FilterManager(Subdispatcher):
 
     @public
     @decode_arg('id_', quantity_decoder)
-    @encode_res(loglist_encoder)
     def getFilterChanges(self, id_):
         if id_ not in self.filters:
             raise BadRequestError('Unknown filter')
         filter_ = self.filters[id_]
-        logger.debug('filter found', filter=filter_, pending=filter_.pending, latest=filter_.latest)
-        if filter_.pending or filter_.latest:
-            return [None] * len(filter_.new_logs)
+        logger.debug('filter found', filter=filter_)
+        if isinstance(filter_, NewBlockFilter):
+            # For filters created with eth_newBlockFilter the return are block hashes
+            # (DATA, 32 Bytes), e.g. ["0x3454645634534..."].
+            r = filter_.check()
+            if r:
+                logger.debug('returning newblock', ts=time.time())
+                return [data_encoder(r.hash)]
+            else:
+                return []
         else:
-            self.filters[id_].check()  # FIXME (on block update only?)
-            return self.filters[id_].new_logs
+            return loglist_encoder(filter_.new_logs)
 
     @public
     @decode_arg('id_', quantity_decoder)
@@ -1077,6 +1136,7 @@ class FilterManager(Subdispatcher):
             raise BadRequestError('Unknown filter')
         filter_ = self.filters[id_]
         if filter_.pending or filter_.latest:
+            raise NotImplementedError()
             return [None] * len(filter_.logs)
         else:
             return self.filters[id_].logs

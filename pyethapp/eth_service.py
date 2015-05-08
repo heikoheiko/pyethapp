@@ -88,9 +88,11 @@ class ChainService(WiredService):
         self.add_blocks_lock = False
         self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
+        self.on_new_head_cbs = []
 
     def _on_new_head(self, block):
-        pass
+        for cb in self.on_new_head_cbs:
+            cb(block)
 
     def add_transaction(self, tx, origin=None):
         assert isinstance(tx, Transaction)
