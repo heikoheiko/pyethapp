@@ -7,6 +7,7 @@ import ethereum.blocks
 from ethereum.utils import (is_numeric, is_string, int_to_big_endian, big_endian_to_int,
                             encode_hex, decode_hex, sha3, zpad)
 import ethereum.slogging as slogging
+from ethereum.slogging import LogRecorder
 from ethereum.transactions import Transaction
 from ethereum import processblock
 import gevent
@@ -1140,6 +1141,62 @@ class FilterManager(Subdispatcher):
             return [None] * len(filter_.logs)
         else:
             return self.filters[id_].logs
+
+    # ########### Trace ############
+    def _get_block_before_tx(self, txhash):
+        tx, blk, i = self.app.services.chain.chain.index.get_transaction(txhash)
+        # get the state we had before this transaction
+        test_blk = ethereum.blocks.Block.init_from_parent(blk.get_parent(),
+                                                          blk.coinbase,
+                                                          extra_data=blk.extra_data,
+                                                          timestamp=blk.timestamp,
+                                                          uncles=blk.uncles)
+        pre_state = test_blk.state_root
+        for i in range(blk.transaction_count):
+            tx_lst_serialized, sr, _ = blk.get_transaction(i)
+            if sha3(rlp.encode(tx_lst_serialized)) == tx.hash:
+                break
+            else:
+                pre_state = sr
+        test_blk.state.root_hash = pre_state
+        return test_blk, tx, i
+
+    def _get_trace(self, txhash):
+        try:  # index
+            test_blk, tx, i = self._get_block_before_tx(txhash)
+        except (KeyError, TypeError):
+            raise Exception('Unknown Transaction  %s' % txhash)
+
+        # collect debug output FIXME set loglevel trace???
+        recorder = LogRecorder()
+        # apply tx (thread? we don't want logs from other invocations)
+        self.app.services.chain.add_transaction_lock.acquire()
+        processblock.apply_transaction(test_blk, tx)  # FIXME deactivate tx context switch or lock
+        self.app.services.chain.add_transaction_lock.release()
+        return dict(tx=txhash, trace=recorder.pop_records())
+
+    @public
+    @decode_arg('txhash', data_decoder)
+    def trace_transaction(self, txhash, exclude=[]):
+        assert len(txhash) == 32
+        assert set(exclude) in set(('stack', 'memory', 'storage'))
+        t = self._get_trace(txhash)
+        for key in exclude:
+            for l in t['trace']:
+                if key in l:
+                    del l[key]
+        return t
+
+    @public
+    @decode_arg('blockhash', data_decoder)
+    def trace_block(self, blockhash, exclude=[]):
+        txs = []
+        blk = self.app.services.chain.chain.get(blockhash)
+        for i in range(blk.transaction_count):
+            tx_lst_serialized, sr, _ = blk.get_transaction(i)
+            txhash_hex = sha3(rlp.encode(tx_lst_serialized)).encode('hex')
+            txs.append(self.trace_transaction(txhash_hex, exclude))
+        return txs
 
 
 if __name__ == '__main__':
