@@ -56,10 +56,13 @@ class ETHProtocol(BaseProtocol):
             network_id = proto.service.app.config['eth'].get('network_id', proto.network_id)
             return [proto.version, network_id, chain_difficulty, chain_head_hash, genesis_hash]
 
-    class gettransactions(BaseProtocol.command):
+    class newblockhashes(BaseProtocol.command):
 
-        "unused"
+        """
+        NewBlockHashes [+0x01: P, hash1: B_32, hash2: B_32, ...] Specify one or more new blocks which have appeared on the network. Including hashes that the sending peer could reasonable be considered to know that the receiving node is aware of is considered Bad Form, and may reduce the reputation of the sending node. Including hashes that the sending node later refuses to honour with a proceeding GetBlocks message is considered Bad Form, and may reduce the reputation of the sending node.
+        """
         cmd_id = 1
+        structure = rlp.sedes.CountableList(rlp.sedes.binary)
 
     class transactions(BaseProtocol.command):
 

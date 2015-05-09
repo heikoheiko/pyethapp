@@ -1,3 +1,4 @@
+import time
 from copy import deepcopy
 from decorator import decorator
 from collections import Iterable
@@ -6,6 +7,7 @@ import ethereum.blocks
 from ethereum.utils import (is_numeric, is_string, int_to_big_endian, big_endian_to_int,
                             encode_hex, decode_hex, sha3, zpad)
 import ethereum.slogging as slogging
+from ethereum.slogging import LogRecorder
 from ethereum.transactions import Transaction
 from ethereum import processblock
 import gevent
@@ -22,12 +24,20 @@ from devp2p.service import BaseService
 from eth_protocol import ETHProtocol
 from ethereum.utils import denoms
 
-log = slogging.get_logger('jsonrpc')
+logger = log = slogging.get_logger('jsonrpc')
 slogging.configure(config_string=':debug')
 
 # defaults
 default_startgas = 100 * 1000
 default_gasprice = 100 * 1000 * denoms.wei
+
+
+def _fail_on_error_dispatch(self, request):
+    method = self.get_method(request.method)
+    # we found the method
+    result = method(*request.args, **request.kwargs)
+    return request.respond(result)
+RPCDispatcher._dispatch = _fail_on_error_dispatch
 
 
 # route logging messages
@@ -92,9 +102,9 @@ class LoggingDispatcher(RPCDispatcher):
         else:
             response_list = [response]
         for res in response_list:
-            try:
+            if hasattr(res, 'result'):
                 self.logger('RPC result', id=res.unique_id, result=res.result)
-            except AttributeError:
+            else:
                 self.logger('RPC error', id=res.unique_id, error=res.error)
         return response
 
@@ -259,14 +269,11 @@ def data_decoder(data):
     if not data.startswith('0x'):
         data = '0x' + data
     if len(data) % 2 != 0:
-        success = False  # must be even length
-    else:
-        try:
-            return decode_hex(data[2:])
-        except TypeError:
-            success = False
-    assert not success
-    raise BadRequestError('Invalid data encoding')
+        raise BadRequestError('Invalid data encoding, must be even length')
+    try:
+        return decode_hex(data[2:])
+    except TypeError:
+        raise BadRequestError('Invalid data hex encoding', data[2:])
 
 
 def data_encoder(data, length=None):
@@ -284,8 +291,6 @@ def data_encoder(data, length=None):
 
 def address_decoder(data):
     """Decode an address from hex with 0x prefix to 20 bytes."""
-    if not data.startswith('0x'):
-        data = '0x' + data
     addr = data_decoder(data)
     if len(addr) not in (20, 0):
         raise BadRequestError('Addresses must be 20 or 0 bytes long')
@@ -538,12 +543,17 @@ class Miner(Subdispatcher):
 
     @public
     def mining(self):
-        return False
+        return self.app.services.pow.active
+
+    @public
+    @encode_res(quantity_encoder)
+    def hashrate(self):
+        return self.app.services.pow.hashrate
 
     @public
     @encode_res(address_encoder)
     def coinbase(self):
-        return '\x00' * 20
+        return self.app.services.accounts.coinbase
 
     @public
     @encode_res(quantity_encoder)
@@ -552,7 +562,7 @@ class Miner(Subdispatcher):
 
     @public
     def accounts(self):
-        return [address_encoder(addr) for addr in ['\x00' * 20]]
+        return [address_encoder(account.address) for account in self.app.services.accounts]
 
 
 class DB(Subdispatcher):
@@ -796,10 +806,10 @@ class Chain(Subdispatcher):
     @public
     @encode_res(data_encoder)
     def coinbase(self):
-        return b'\x00' * 20
+        return self.app.services.accounts.coinbase
 
     @public
-    def send_Transaction(self, data):
+    def sendTransaction(self, data):
         """
         extend spec to support v,r,s signed transactions
         """
@@ -820,7 +830,7 @@ class Chain(Subdispatcher):
         r = get_data_default('r', quantity_decoder, 0)
         s = get_data_default('s', quantity_decoder, 0)
         nonce = get_data_default('nonce', quantity_decoder, None)
-        sender = get_data_default('from', address_decoder, None)
+        sender = get_data_default('from', address_decoder, self.app.services.accounts.coinbase)
 
         # create transaction
         if signed:
@@ -940,18 +950,26 @@ class Filter(object):
         self._logs = {}
         self._new_logs = {}
 
+    def __repr__(self):
+        return '<Filter(addresses=%r, topics=%r)>' % (self.addresses, self.topics)
+
     def check(self):
         """Check for new logs."""
-        blocks_to_check = [block for block in self.blocks if block not in self.blocks_done]
+        blocks_to_check = self.blocks[:]
         if self.pending:
             blocks_to_check.append(self.chain.head_candidate)
         if self.latest:
             blocks_to_check.append(self.chain.head)
         # go through all receipts of all blocks
+        logger.debug('blocks to check', blocks=blocks_to_check)
         for block in blocks_to_check:
+            if block in self.blocks_done:
+                continue
             receipts = block.get_receipts()
+            logger.debug('receipts', block=block, receipts=receipts)
             for receipt in receipts:
                 for i, log in enumerate(receipt.logs):
+                    logger.debug('log', log=log, topics=self.topics)
                     if self.topics is not None:
                         # compare topics one by one
                         topic_match = True
@@ -966,6 +984,7 @@ class Filter(object):
                     if self.addresses is not None and log.address not in self.addresses:
                         continue
                     # still here, so match was successful => add to log list
+                    assert False, 'we never find filters!'
                     id_ = ethereum.utils.sha3rlp(log)
                     self._logs[id_] = (log, i, block)
                     self._new_logs[id_] = (log, i, block)
@@ -980,9 +999,52 @@ class Filter(object):
 
     @property
     def new_logs(self):
+        self.check()
         ret = self._new_logs.copy()
         self._new_logs = {}
         return ret.values()
+
+
+class NewBlockFilter(object):
+
+    """A filter for new blocks.
+    :ivar pending: if `True` also look for logs from the current pending block
+    :ivar latest: if `True` also look for logs from the current head
+    :ivar blocks_done: a list of blocks that don't have to be searched again
+    """
+
+    def __init__(self, chainservice, pending=False, latest=False):
+        self.chainservice = chainservice
+        self.blocks_done = set()
+        assert latest or pending
+        self.pending = pending
+        self.latest = latest
+        self.new_block_event = gevent.event.Event()
+        self._new_block_cb = lambda b: self.new_block_event.set()
+        self.chainservice.on_new_head_cbs.append(self._new_block_cb)
+
+    def __repr__(self):
+        return '<NewBlockFilter(latest=%r, pending=%r)>' % (self.latest, self.pending)
+
+    def __del__(self):
+        self.chainservice.on_new_head_cbs.remove(self._new_block_cb)
+
+    def check(self):
+        "returns changed block or None"
+        if self.pending:
+            block = self.chainservice.chain.head_candidate
+        else:
+            block = self.chainservice.chain.head
+        if block not in self.blocks_done:
+            self.blocks_done.add(block)
+            return block
+        # wait for event
+        if self.new_block_event.is_set():
+            self.new_block_event.clear()
+        log.debug('NewBlockFilter, waiting for event', ts=time.time())
+        if self.new_block_event.wait(timeout=0.9):
+            log.debug('NewBlockFilter, got new_block event', ts=time.time())
+            return self.check()
 
 
 class FilterManager(Subdispatcher):
@@ -999,12 +1061,10 @@ class FilterManager(Subdispatcher):
     def newFilter(self, filter_dict):
         if not isinstance(filter_dict, dict):
             raise BadRequestError('Filter must be an object')
-        required_keys = set(['fromBlock', 'toBlock'])
-        if not required_keys.issubset(set(filter_dict.keys())):
-            raise BadRequestError('Invalid filter object')
-
-        b0 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['fromBlock']))
-        b1 = self.json_rpc_server.get_block(block_id_decoder(filter_dict['toBlock']))
+        b0 = self.json_rpc_server.get_block(
+            block_id_decoder(filter_dict.get('fromBlock', 'latest')))
+        b1 = self.json_rpc_server.get_block(
+            block_id_decoder(filter_dict.get('toBlock', 'latest')))
         if b1.number < b0.number:
             raise BadRequestError('fromBlock must be prior or equal to toBlock')
         address = filter_dict.get('address', None)
@@ -1041,7 +1101,7 @@ class FilterManager(Subdispatcher):
             raise JSONRPCInvalidParamsError('Parameter must be either "latest" or "pending"')
         pending = (s == 'pending')
         latest = (s == 'latest')
-        filter_ = Filter(self.chain.chain, pending=pending, latest=latest)
+        filter_ = NewBlockFilter(self.chain, pending=pending, latest=latest)
         self.filters[self.next_id] = filter_
         self.next_id += 1
         return self.next_id - 1
@@ -1057,15 +1117,22 @@ class FilterManager(Subdispatcher):
 
     @public
     @decode_arg('id_', quantity_decoder)
-    @encode_res(loglist_encoder)
     def getFilterChanges(self, id_):
         if id_ not in self.filters:
             raise BadRequestError('Unknown filter')
         filter_ = self.filters[id_]
-        if filter_.pending or filter_.latest:
-            return [None] * len(filter_.new_logs)
+        logger.debug('filter found', filter=filter_)
+        if isinstance(filter_, NewBlockFilter):
+            # For filters created with eth_newBlockFilter the return are block hashes
+            # (DATA, 32 Bytes), e.g. ["0x3454645634534..."].
+            r = filter_.check()
+            if r:
+                logger.debug('returning newblock', ts=time.time())
+                return [data_encoder(r.hash)]
+            else:
+                return []
         else:
-            return self.filters[id_].new_logs
+            return loglist_encoder(filter_.new_logs)
 
     @public
     @decode_arg('id_', quantity_decoder)
@@ -1075,9 +1142,66 @@ class FilterManager(Subdispatcher):
             raise BadRequestError('Unknown filter')
         filter_ = self.filters[id_]
         if filter_.pending or filter_.latest:
+            raise NotImplementedError()
             return [None] * len(filter_.logs)
         else:
             return self.filters[id_].logs
+
+    # ########### Trace ############
+    def _get_block_before_tx(self, txhash):
+        tx, blk, i = self.app.services.chain.chain.index.get_transaction(txhash)
+        # get the state we had before this transaction
+        test_blk = ethereum.blocks.Block.init_from_parent(blk.get_parent(),
+                                                          blk.coinbase,
+                                                          extra_data=blk.extra_data,
+                                                          timestamp=blk.timestamp,
+                                                          uncles=blk.uncles)
+        pre_state = test_blk.state_root
+        for i in range(blk.transaction_count):
+            tx_lst_serialized, sr, _ = blk.get_transaction(i)
+            if sha3(rlp.encode(tx_lst_serialized)) == tx.hash:
+                break
+            else:
+                pre_state = sr
+        test_blk.state.root_hash = pre_state
+        return test_blk, tx, i
+
+    def _get_trace(self, txhash):
+        try:  # index
+            test_blk, tx, i = self._get_block_before_tx(txhash)
+        except (KeyError, TypeError):
+            raise Exception('Unknown Transaction  %s' % txhash)
+
+        # collect debug output FIXME set loglevel trace???
+        recorder = LogRecorder()
+        # apply tx (thread? we don't want logs from other invocations)
+        self.app.services.chain.add_transaction_lock.acquire()
+        processblock.apply_transaction(test_blk, tx)  # FIXME deactivate tx context switch or lock
+        self.app.services.chain.add_transaction_lock.release()
+        return dict(tx=txhash, trace=recorder.pop_records())
+
+    @public
+    @decode_arg('txhash', data_decoder)
+    def trace_transaction(self, txhash, exclude=[]):
+        assert len(txhash) == 32
+        assert set(exclude) in set(('stack', 'memory', 'storage'))
+        t = self._get_trace(txhash)
+        for key in exclude:
+            for l in t['trace']:
+                if key in l:
+                    del l[key]
+        return t
+
+    @public
+    @decode_arg('blockhash', data_decoder)
+    def trace_block(self, blockhash, exclude=[]):
+        txs = []
+        blk = self.app.services.chain.chain.get(blockhash)
+        for i in range(blk.transaction_count):
+            tx_lst_serialized, sr, _ = blk.get_transaction(i)
+            txhash_hex = sha3(rlp.encode(tx_lst_serialized)).encode('hex')
+            txs.append(self.trace_transaction(txhash_hex, exclude))
+        return txs
 
 
 if __name__ == '__main__':

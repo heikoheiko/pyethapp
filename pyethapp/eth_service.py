@@ -1,13 +1,13 @@
 # https://github.com/ethereum/go-ethereum/wiki/Blockpool
 import time
-from ethereum.utils import privtoaddr, sha3
+from ethereum.utils import sha3
 import rlp
 from rlp.utils import encode_hex
 from ethereum import processblock
 from synchronizer import Synchronizer
 from ethereum.slogging import get_logger
 from ethereum.chain import Chain
-from ethereum.blocks import Block
+from ethereum.blocks import Block, VerificationFailed
 from ethereum.transactions import Transaction
 from devp2p.service import WiredService
 import eth_protocol
@@ -69,6 +69,8 @@ class ChainService(WiredService):
     config = None
     block_queue_size = 1024
     transaction_queue_size = 1024
+    processed_gas = 0
+    processed_elapsed = 0
 
     def __init__(self, app):
         self.config = app.config
@@ -86,9 +88,21 @@ class ChainService(WiredService):
         self.add_blocks_lock = False
         self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
+        self.on_new_head_cbs = []
+        self.on_new_head_candidate_cbs = []
+
+    @property
+    def is_syncing(self):
+        return self.synchronizer.synctask is not None
 
     def _on_new_head(self, block):
-        pass
+        for cb in self.on_new_head_cbs:
+            cb(block)
+        self._on_new_head_candidate()  # we implicitly have a new head_candidate
+
+    def _on_new_head_candidate(self):
+        for cb in self.on_new_head_candidate_cbs:
+            cb(self.chain.head_candidate)
 
     def add_transaction(self, tx, origin=None):
         assert isinstance(tx, Transaction)
@@ -97,14 +111,23 @@ class ChainService(WiredService):
         success = self.chain.add_transaction(tx)
         self.add_transaction_lock.release()
         if success:
+            self._on_new_head_candidate()
             self.broadcast_transaction(tx, origin=origin)  # asap
 
     def add_block(self, t_block, proto):
         "adds a block to the block_queue and spawns _add_block if not running"
         self.block_queue.put((t_block, proto))  # blocks if full
         if not self.add_blocks_lock:
-            self.add_blocks_lock = True
+            self.add_blocks_lock = True  # need to lock here (ctx switch is later)
             gevent.spawn(self._add_blocks)
+
+    def add_mined_block(self, block):
+        log.debug('adding mined block', block=block)
+        assert block.check_pow()
+        if self.chain.add_block(block):
+            log.info('added', block=block, ts=time.time())
+            assert block == self.chain.head
+            self.broadcast_newblock(block, chain_difficulty=block.chain_difficulty())
 
     def knows_block(self, block_hash):
         "if block is in chain or in queue"
@@ -117,7 +140,10 @@ class ChainService(WiredService):
         return False
 
     def _add_blocks(self):
-        log.debug('add_blocks', qsize=self.block_queue.qsize())
+        log.debug('add_blocks', qsize=self.block_queue.qsize(),
+                  add_tx_lock=self.add_transaction_lock.locked())
+        assert self.add_blocks_lock is True
+        self.add_transaction_lock.acquire()
         try:
             while not self.block_queue.empty():
                 t_block, proto = self.block_queue.peek()  # peek: knows_block while processing
@@ -129,6 +155,7 @@ class ChainService(WiredService):
                     log.warn('missing parent', block=t_block)
                     self.block_queue.get()
                     continue
+                # FIXME, this is also done in validation and in synchronizer for new_blocks
                 if not t_block.header.check_pow():
                     log.warn('invalid pow', block=t_block, FIXME='ban node')
                     self.block_queue.get()
@@ -137,20 +164,29 @@ class ChainService(WiredService):
                     st = time.time()
                     block = t_block.to_block(db=self.chain.db)
                     elapsed = time.time() - st
-                    log.debug('deserialized', elapsed='%.2fs' % elapsed,
-                              gas_used=block.gas_used, gpsec=int(block.gas_used / elapsed))
+                    log.debug('deserialized', elapsed='%.4fs' % elapsed,
+                              gas_used=block.gas_used, gpsec=self.gpsec(block.gas_used, elapsed))
                 except processblock.InvalidTransaction as e:
                     log.warn('invalid transaction', block=t_block, error=e, FIXME='ban node')
-                    gevent.sleep(0.001)
+                    self.block_queue.get()
+                    continue
+                except VerificationFailed as e:
+                    log.warn('verification failed', error=e, FIXME='ban node')
+                    self.block_queue.get()
                     continue
 
                 if self.chain.add_block(block):
-                    log.info('added', block=block)
-                self.block_queue.get()
+                    log.info('added', block=block, ts=time.time())
+                self.block_queue.get()  # remove block from queue (we peeked only)
                 gevent.sleep(0.001)
-
         finally:
             self.add_blocks_lock = False
+            self.add_transaction_lock.release()
+
+    def gpsec(self, gas_spent=0, elapsed=0):
+        self.processed_gas += gas_spent
+        self.processed_elapsed += elapsed
+        return int(self.processed_gas / (0.001 + self.processed_elapsed))
 
     def broadcast_newblock(self, block, chain_difficulty=None, origin=None):
         if not chain_difficulty:
@@ -243,7 +279,13 @@ class ChainService(WiredService):
 
         last = child_block_hash
         while len(found) < max_hashes:
-            last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            try:
+                last = rlp.decode_lazy(self.chain.db.get(last))[0][0]
+            except KeyError:
+                # this can happen if we started a chain download, which did not complete
+                # should not happen if the hash is part of the canonical chain
+                log.warn('KeyError in getblockhashes', hash=last)
+                break
             if last:
                 found.append(last)
             else:
