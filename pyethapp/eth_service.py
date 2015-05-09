@@ -89,10 +89,20 @@ class ChainService(WiredService):
         self.add_transaction_lock = gevent.lock.Semaphore()
         self.broadcast_filter = DuplicatesFilter()
         self.on_new_head_cbs = []
+        self.on_new_head_candidate_cbs = []
+
+    @property
+    def is_syncing(self):
+        return self.synchronizer.synctask is not None
 
     def _on_new_head(self, block):
         for cb in self.on_new_head_cbs:
             cb(block)
+        self._on_new_head_candidate()  # we implicitly have a new head_candidate
+
+    def _on_new_head_candidate(self):
+        for cb in self.on_new_head_candidate_cbs:
+            cb(self.chain.head_candidate)
 
     def add_transaction(self, tx, origin=None):
         assert isinstance(tx, Transaction)
@@ -101,6 +111,7 @@ class ChainService(WiredService):
         success = self.chain.add_transaction(tx)
         self.add_transaction_lock.release()
         if success:
+            self._on_new_head_candidate()
             self.broadcast_transaction(tx, origin=origin)  # asap
 
     def add_block(self, t_block, proto):
@@ -109,6 +120,14 @@ class ChainService(WiredService):
         if not self.add_blocks_lock:
             self.add_blocks_lock = True  # need to lock here (ctx switch is later)
             gevent.spawn(self._add_blocks)
+
+    def add_mined_block(self, block):
+        log.debug('adding mined block', block=block)
+        assert block.check_pow()
+        if self.chain.add_block(block):
+            log.info('added', block=block, ts=time.time())
+            assert block == self.chain.head
+            self.broadcast_newblock(block, chain_difficulty=block.chain_difficulty())
 
     def knows_block(self, block_hash):
         "if block is in chain or in queue"

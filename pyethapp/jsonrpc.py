@@ -543,7 +543,12 @@ class Miner(Subdispatcher):
 
     @public
     def mining(self):
-        return False
+        return self.app.services.pow.active
+
+    @public
+    @encode_res(quantity_encoder)
+    def hashrate(self):
+        return self.app.services.pow.hashrate
 
     @public
     @encode_res(address_encoder)
