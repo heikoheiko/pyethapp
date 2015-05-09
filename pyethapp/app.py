@@ -19,6 +19,7 @@ import config as konfig
 from db_service import DBService
 from jsonrpc import JSONRPCServer
 from pow_service import PoWService
+from accounts import AccountsService
 from pyethapp import __version__
 import utils
 
@@ -26,8 +27,8 @@ slogging.configure(config_string=':debug')
 log = slogging.get_logger('app')
 
 
-services = [PoWService, DBService, NodeDiscovery, PeerManager, ChainService, JSONRPCServer, Console]
-services += utils.load_contrib_services()
+services = [PoWService, DBService, AccountsService, NodeDiscovery, PeerManager, ChainService,
+            JSONRPCServer, Console]
 
 
 class EthApp(BaseApp):
@@ -45,12 +46,16 @@ class EthApp(BaseApp):
               help='data directory')
 @click.option('log_config', '--log_config', '-l', multiple=False, type=str,
               help='log_config string: e.g. ":info,eth:debug')
+@click.option('--log-json/--log-no-json', default=False,
+              help='log as structured json output')
+@click.option('bootstrap_node', '--bootstrap_node', '-b', multiple=False, type=str,
+              help='single bootstrap_node as enode://pubkey@host:port')
 @click.pass_context
-def app(ctx, alt_config, config_values, data_dir, log_config):
+def app(ctx, alt_config, config_values, data_dir, log_config, bootstrap_node, log_json):
 
     # configure logging
     log_config = log_config or ':info'
-    slogging.configure(log_config)
+    slogging.configure(log_config, log_json=log_json)
 
     # data dir default or from cli option
     data_dir = data_dir or konfig.default_data_dir
@@ -78,6 +83,9 @@ def app(ctx, alt_config, config_values, data_dir, log_config):
             raise BadParameter('Config parameter must be of the form "a.b.c=d" where "a.b.c" '
                                'specifies the parameter to set and d is a valid yaml value '
                                '(example: "-c jsonrpc.port=5000")')
+    if bootstrap_node:
+        config['discovery']['bootstrap_nodes'] = [bytes(bootstrap_node)]
+
     ctx.obj = {'config': config}
 
 
@@ -85,10 +93,11 @@ def app(ctx, alt_config, config_values, data_dir, log_config):
 @click.option('--dev/--nodev', default=False, help='Exit at unhandled exceptions')
 @click.pass_context
 def run(ctx, dev):
-    """Start the client"""
+    """Start the client ( --dev to stop on error)"""
     # create app
     app = EthApp(ctx.obj['config'])
 
+    # development mode
     if dev:
         gevent.get_hub().SYSTEM_ERROR = BaseException
         try:
@@ -96,6 +105,9 @@ def run(ctx, dev):
         except:
             log.warn("can't get and add login name to client_version")
             pass
+
+    # dump config
+    konfig.dump_config(ctx.obj['config'])
 
     # register services
     for service in services:
@@ -108,7 +120,7 @@ def run(ctx, dev):
     # start app
     app.start()
 
-    # wait for interupt
+    # wait for interrupt
     evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)
@@ -182,7 +194,7 @@ def blocktest(ctx, file, name):
     for block in blocks[1:]:
         app.services.chain.chain.add_block(block)
 
-    # wait for interupt
+    # wait for interrupt
     evt = Event()
     gevent.signal(signal.SIGQUIT, evt.set)
     gevent.signal(signal.SIGTERM, evt.set)
